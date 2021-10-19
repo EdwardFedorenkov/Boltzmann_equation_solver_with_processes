@@ -9,12 +9,12 @@ enum class ProcessType{
 	HH_Collisions,
 	He_Collisions,
 	Hp_Collisions,
-	H2H_Collisions,
-	H2H2_Collisions,
-	Recombination,
-	H_Ionization,
-	H2_Ionization,
-	Dissociation,
+	HH_Excitation,
+	He_Excitation,
+	Hp_Excitation,
+	He_Ionization,
+	Hp_Ionization,
+	Charge_exchange
 };
 
 enum class DataDescription{
