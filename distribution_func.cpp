@@ -202,6 +202,23 @@ double DistributionFunction::GetOneCollisionTime() const{
 			);
 }
 
+double DistributionFunction::ComputeTimeStep(const field<cube>& st, const double accuracy) const{
+	vec time_step(space_grid.GetSize(), fill::zeros);
+	double one_coll_time = GetOneCollisionTime();
+	for(size_t i = 0; i < space_grid.GetSize(); ++i){
+		cube time_steps = accuracy * distribution_function(i) / abs(st(i));
+		time_steps.transform([accuracy, one_coll_time](double val)
+				{ return ((val > datum::eps) and isfinite(val)) ? val : accuracy * one_coll_time; });
+		time_step(i) = time_steps.min();
+	}
+	double collisions_time_step = min(time_step);
+	//collisions_time_step = min(collisions_time_step, GetOneCollisionTime() * accuracy);
+	if(space_grid.GetSize() == 1){
+		return collisions_time_step;
+	}
+	return min(0.5 * space_grid.GetGridStep() / velocity_grid.GetMax(), collisions_time_step);
+}
+
 void DistributionFunction::SaveMatrix_x_vx(const size_t vy_position, const size_t vz_position, const size_t time_index) const{
 	size_t x_size = space_grid.GetSize();
 	size_t v_size = velocity_grid.GetSize();
@@ -241,6 +258,23 @@ void DistributionFunction::RungeKutta2_ElasticCollisons(const mat& coll_mat, dou
 	cube df_mid = distribution_function(slice_index) + time_step * first_coll_int;
 	cube second_coll_int = ComputeCollisionsIntegral(df_mid, coll_mat, velocity_grid, Do_treatment);
 	distribution_function(slice_index) += (second_coll_int + first_coll_int) * 0.5 * time_step ;
+}
+
+double DistributionFunction::TimeEvolution_SmartTimeStep(const mat& coll_mat, const double accuracy, bool Do_treatment){
+	field<cube> coll_ints(space_grid.GetSize());
+	for(size_t i = 0; i < space_grid.GetSize(); ++i){
+		coll_ints(i) = ComputeCollisionsIntegral(distribution_function(i), coll_mat, velocity_grid, Do_treatment);
+	}
+	double time_step = ComputeTimeStep(coll_ints, accuracy);
+	if(space_grid.GetSize() > 1){
+		for(size_t i = 0; i < space_grid.GetSize(); ++i){
+			ChangeDFbyTransport(i, time_step);
+		}
+	}
+	for(size_t i = 0; i < space_grid.GetSize(); ++i){
+		distribution_function(i) += coll_ints(i) * time_step;
+	}
+	return time_step;
 }
 
 cube DistributionFunction::Maxwell(double density, double temperature) const{

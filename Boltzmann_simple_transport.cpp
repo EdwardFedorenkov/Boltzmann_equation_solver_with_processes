@@ -155,14 +155,14 @@ void TestSimpleTransport(){
 }
 
 void RecordPhysParams_LocalCollTest(double temperature, double dencity, double Vmax,
-		double time_step, double init_distr_max_val){
-	vec params(5, fill::zeros);
+		vec time_step, double init_distr_max_val){
+	vec params(4, fill::zeros);
 	params(0) = temperature;
 	params(1) = dencity;
 	params(2) = Vmax;
-	params(3) = time_step;
-	params(4) = init_distr_max_val;
+	params(3) = init_distr_max_val;
 	params.save("params.bin", raw_binary);
+	time_step.save("time_steps.bin", raw_binary);
 }
 
 void LinearDataSaving(mat& data){
@@ -224,38 +224,30 @@ int main() {
 	// Velocity grid building
 	VelocityGrid v(v_size, V_max);
 
-	// Test Distribution:
-	cube df(v_size, v_size, v_size, fill::zeros);
-	size_t mid_point = (v_size - 1) / 2;
-	df(mid_point, mid_point, mid_point) = n / pow(v.GetGridStep(), 3);
-
 	// Distribution function building
-	//DistributionFunction f_H(DistributionType::TestDistribution_1, H, v, n, T);
-	DistributionFunction f_H(df, H, v);
+	DistributionFunction f_H(DistributionType::TestDistribution_1, H, v, n, T);
 	f_H.SaveMatrixes(set<size_t>({0, 1}), (v_size - 1) / 2, 0, "DF0.bin");
 
 	// Time step determination
-	double one_collision_time = f_H.GetOneCollisionTime();
-	double time_step = 0.05 * one_collision_time;
-	size_t time_steps = 10;
-
-	RecordPhysParams_LocalCollTest(T, n, V_max, time_step, max(vectorise(f_H.GetDistrSlice(0))) );
+	double accuracy = 0.05;
+	size_t time_steps = 100;
+	vector<double> times;
+	double time = 0.0;
+	times.reserve(time_steps);
 
 	// Collisions Matrix building
 	mat elastic_matrix = BuildCollisionMatrix(v, H);
 
 	for(size_t t = 0; t < time_steps; ++t){
-		f_H.RungeKutta2_ElasticCollisons(elastic_matrix, time_step, 0, true);
-		/*f_H.RungeKutta2_ElasticCollisons(elastic_matrix, time_step, 0, true);
-		dalta_temperature(t) = abs(T0 - f_H.ComputeTemperatureStatic()[0]);
-		dalta_density(t) = abs(n0 - f_H.ComputeDensity()[0]);
-		mean_velocity_x(t) = f_H.ComputeMeanVelocity()[0](0);
-		mean_velocity_y(t) = f_H.ComputeMeanVelocity()[0](1);
-		mean_velocity_z(t) = f_H.ComputeMeanVelocity()[0](2);
-		*/
-		//if( !(t % 10) and t != 0){
+		double dt = f_H.TimeEvolution_SmartTimeStep(elastic_matrix, accuracy, true);
+		cout << dt << endl;
+		time += dt;
+		if( !(t % 10) and t != 0){
 			f_H.SaveMatrixes(set<size_t>({0, 1}), (v_size - 1) / 2, 0, "DF" + GetTimeID(t+1) + ".bin");
-		//}
+			times.push_back(time);
+			time = 0.0;
+		}
 	}
+	RecordPhysParams_LocalCollTest(T, n, V_max, vec(times), max(vectorise(f_H.GetDistrSlice(0))) );
 	return 0;
 }
