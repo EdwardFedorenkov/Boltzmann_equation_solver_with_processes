@@ -18,7 +18,8 @@ enum class ProcessType{
 	He_Excitation,
 	Hp_Excitation,
 	He_Ionization,
-	Charge_exchange
+	Charge_exchange,
+	Hard_spheres_collision
 };
 
 enum class DataType{
@@ -26,7 +27,8 @@ enum class DataType{
 	Rate_coefficient,
 	Cross_section_elastic,
 	Cross_section_momentum_transport,
-	Diffusion_coefficient
+	Diffusion_coefficient,
+	Hard_spheres_cross_section
 };
 
 enum class ParamsType{
@@ -35,6 +37,8 @@ enum class ParamsType{
 	Angle,
 	Density
 };
+
+vec BuildLogVec(const double x, const size_t s);
 
 class ElementaryProcess{
 public:
@@ -49,18 +53,73 @@ private:
 	const DataType dt;
 };
 
-class Charge_exchange : public ElementaryProcess{
+class Hard_spheres_collision : public ElementaryProcess{
 public:
-	Charge_exchange(const string& path) : ElementaryProcess(ProcessType::Charge_exchange, DataType::Rate_coefficient){
-
-	}
+	Hard_spheres_collision(const double dcs) : ElementaryProcess(ProcessType::Hard_spheres_collision,
+			DataType::Hard_spheres_cross_section), diff_cross_section(dcs) {}
 
 	double ComputeDataTypeValue(const map<ParamsType, double>& params) const override{
-
+		return diff_cross_section;
 	}
 
 private:
-	vector<vector<double>> fitting_params;
+	double diff_cross_section;
+};
+
+class Charge_exchange : public ElementaryProcess{
+public:
+	Charge_exchange(const string& path) : ElementaryProcess(ProcessType::Charge_exchange, DataType::Rate_coefficient) {
+		fstream file(path, ios_base::in);
+		if(file.is_open()){
+			string line;
+			for(size_t j = 0; j < 4; ++j){
+				getline(file, line);
+				istringstream buffer(line);
+				switch(j){
+				case 0:
+					T_lims.first = *istream_iterator<double>(buffer);
+					break;
+				case 1:
+					T_lims.second = *istream_iterator<double>(buffer);
+					break;
+				case 2:
+					E_lims.first = *istream_iterator<double>(buffer);
+					break;
+				case 3:
+					E_lims.second = *istream_iterator<double>(buffer);
+					break;
+				}
+			}
+
+			while(getline(file, line)){
+				istringstream buffer(line);
+				vector<double> param(9, 0.0);
+				param.push_back(*istream_iterator<double>(buffer));
+				for(size_t i = 0; i < 8; ++i){
+					getline(file, line);
+					istringstream tmp_buffer(line);
+					param.push_back(*istream_iterator<double>(tmp_buffer));
+				}
+				fitting_params = join_horiz(fitting_params, vec(param));
+			}
+		}
+	}
+
+	double ComputeDataTypeValue(const map<ParamsType, double>& params) const override{
+		double T = params.at(ParamsType::Temperature);
+		double E = params.at(ParamsType::Energy);
+		double result = 0.0;
+		if((T_lims.second - T)*(T - T_lims.first) >= 0 and (E_lims.second - E)*(E - E_lims.first) >= 0){
+			result = exp(as_scalar(trans(BuildLogVec(T, fitting_params.n_cols))*fitting_params*BuildLogVec(E, fitting_params.n_rows)));
+		}else
+			throw out_of_range("T or E is out of limits");
+		return result;
+	}
+
+private:
+	mat fitting_params;
+	pair<double, double> T_lims;
+	pair<double, double> E_lims;
 };
 
 class He_ionization : public ElementaryProcess{
@@ -156,8 +215,8 @@ public:
 				vector<vector<double>> current_params;
 				for(size_t i = 0; i < 3; ++i){
 					getline(file, line);
-					buffer = line;
-					vector<double> param((istream_iterator<double>(buffer)),
+					istringstream tmp_buffer(line);
+					vector<double> param((istream_iterator<double>(tmp_buffer)),
 							istream_iterator<double>());
 					current_params.push_back(param);
 				}
@@ -181,7 +240,7 @@ public:
 		double upper_cross_section = FittingFunction(upper_index, angle);
 		double lower_cross_section = FittingFunction(upper_index - 1, angle);
 		return lower_cross_section
-				+ (energy - energies[upper_index-1]) / (energy[upper_index] - energies[upper_index-1])
+				+ (energy - energies[upper_index-1]) / (energies[upper_index] - energies[upper_index-1])
 				* (upper_cross_section - lower_cross_section);
 	}
 
@@ -213,3 +272,7 @@ private:
 	map<size_t, vector<vector<double>>> energy_idx_to_coeff;
 	vector<double> energies;
 };
+
+vec BuildLinearCoeff(const ElementaryProcess& ep){
+	ep.ComputeDataTypeValue(params);
+}

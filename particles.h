@@ -1,6 +1,8 @@
 #pragma once
 
 #include <armadillo>
+#include <memory>
+#include "processes.h"
 
 using namespace std;
 using namespace arma;
@@ -27,25 +29,38 @@ enum class CollisionModel{
 };
 
 struct Particle{
-	Particle() : particle_type(ParticlesType::test), collision_model(CollisionModel::test), mass(Sqr(datum::c_0*100)), hard_speres_cross_section(1.0){};
+	Particle() : p_type(ParticlesType::test),
+	vector<shared_ptr<ElementaryProcess>>{make_shared<Hard_spheres_collision>(1.0)},
+	mass(Sqr(datum::c_0*100)) {}
 
-	Particle(ParticlesType p, CollisionModel cm) : particle_type(p), collision_model(cm){
-		// Mass
-		if(particle_type == ParticlesType::H || particle_type == ParticlesType::Proton){
-			mass =  datum::m_p * datum::c_0 * datum::c_0 / datum::eV;
-		}else if(particle_type == ParticlesType::Electron){
+	Particle(ParticlesType p, vector<shared_ptr<ElementaryProcess>> pl) : p_type(p), processes_list(pl){
+		switch(p){
+		case ParticlesType::Electron:
 			mass = datum::m_e * datum::c_0 * datum::c_0 / datum::eV;
-		}else{
-			mass =  2 * datum::m_p * datum::c_0 * datum::c_0 / datum::eV;
-		}
-		// Hard spheres cross section
-		if(particle_type == ParticlesType::H || particle_type == ParticlesType::H_2 || particle_type == ParticlesType::H_2Plus){
-			hard_speres_cross_section = datum::a_0 * datum::a_0 * 1e4 / 4;
+			break;
+		case ParticlesType::H or ParticlesType::Proton:
+			mass = datum::m_p * datum::c_0 * datum::c_0 / datum::eV;
+			break;
+		case ParticlesType::H_2 or ParticlesType::H_2Plus:
+			mass = 2 * datum::m_p * datum::c_0 * datum::c_0 / datum::eV;
+			break;
+		case ParticlesType::test:
+			mass = Sqr(datum::c_0*100);
+			break;
 		}
 	}
 
-	const ParticlesType particle_type;
-	const CollisionModel collision_model;
-	double mass;
-	double hard_speres_cross_section;
+	double GetMass() const{
+		return mass;
+	}
+
+	ParticlesType GetParticleType() const{
+		return p_type;
+	}
+
+
+
+	ParticlesType p_type;
+	vector<shared_ptr<ElementaryProcess>> processes_list;
+	const double mass;
 };

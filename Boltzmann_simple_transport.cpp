@@ -13,6 +13,7 @@
 #include "distribution_func.h"
 #include "particles.h"
 #include "elastic_collisions.h"
+#include "data_saver.h"
 
 #include <iostream>
 #include <armadillo>
@@ -154,40 +155,8 @@ void TestSimpleTransport(){
 			df.GetDistrSlice(2).slice(5).rows(0, 9));
 }
 
-void RecordPhysParams_LocalCollTest(double temperature, double dencity, double Vmax,
-		vec time_step, double init_distr_max_val){
-	vec params(4, fill::zeros);
-	params(0) = temperature;
-	params(1) = dencity;
-	params(2) = Vmax;
-	params(3) = init_distr_max_val;
-	params.save("params.bin", raw_binary);
-	time_step.save("time_steps.bin", raw_binary);
-}
-
 void LinearDataSaving(mat& data){
 	data.save("linear_data.bin", raw_binary);
-}
-
-string GetTimeID(const size_t t){
-	string result = "";
-	vector<size_t> nums;
-	size_t i = t;
-	while (i != 0){
-		nums.push_back(i % 10);
-		i /= 10;
-	}
-	reverse(nums.begin(), nums.end());
-	for(size_t j = 0; j < nums.size(); ++j){
-		if(j != nums.size() - 1){
-			for(size_t k = 0; k < nums[j]; ++k){
-				result += "9";
-			}
-		}else{
-			result += to_string(nums[j]);
-		}
-	}
-	return result;
 }
 
 int main() {
@@ -203,7 +172,9 @@ int main() {
 	RUN_TEST(tr, TestSimpleTransport);
 
 	// Creating particles included in model
-	Particle H(ParticlesType::H, CollisionModel::hard_spheres);
+	Particle H(ParticlesType::H, vector<shared_ptr<ElementaryProcess>>{
+		make_shared<HH_elastic>(ProcessType::HH_elastic, "example.txt")
+	});
 
 	// Space and velocity grids parameters
 	//size_t x_size = 15;
@@ -245,9 +216,8 @@ int main() {
 		if( !(t % 10) and t != 0){
 			f_H.SaveMatrixes(set<size_t>({0, 1}), (v_size - 1) / 2, 0, "DF" + GetTimeID(t+1) + ".bin");
 			times.push_back(time);
-			time = 0.0;
 		}
 	}
-	RecordPhysParams_LocalCollTest(T, n, V_max, vec(times), max(vectorise(f_H.GetDistrSlice(0))) );
+	RecordPhysParams_LocalCollTest(T, n, V_max, max(vectorise(f_H.GetDistrSlice(0))) );
 	return 0;
 }

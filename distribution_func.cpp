@@ -212,7 +212,6 @@ double DistributionFunction::ComputeTimeStep(const field<cube>& st, const double
 		time_step(i) = time_steps.min();
 	}
 	double collisions_time_step = min(time_step);
-	//collisions_time_step = min(collisions_time_step, GetOneCollisionTime() * accuracy);
 	if(space_grid.GetSize() == 1){
 		return collisions_time_step;
 	}

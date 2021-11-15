@@ -16,7 +16,7 @@ pair<vec3, vec3> PostCollisionVelocities(const vec3& initial_vel,
 
 pair<array<size_t, 3>, bool> FindNearestNode(const vec& vel_grid, const vec3& point);
 
-mat BuildCollisionMatrix(const VelocityGrid& v, const Particle& p);
+mat BuildCollisionMatrix(const VelocityGrid& v, const HH_elastic& p);
 
 bool IndexCheckRange(const array<int, 3>& idx, size_t size);
 

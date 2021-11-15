@@ -66,7 +66,7 @@ mat BuildCollisionMatrix(const VelocityGrid& v, const Particle& p){
 	vec vel_1D(v.Get1DGrid());
 	mat sourse(v_size * v_size * v_size, v_size * v_size * v_size, fill::zeros);
 	mat runoff(sourse);
-	double factor = p.hard_speres_cross_section * phase_volume * 4 * datum::pi / N_angle;
+	double factor = phase_volume * 4 * datum::pi / N_angle;
 	for(size_t k = 0; k < v_size; ++k){
 		for(size_t l = 0; l < v_size; ++l){
 			for(size_t m = 0; m < v_size; ++m){
@@ -83,11 +83,11 @@ mat BuildCollisionMatrix(const VelocityGrid& v, const Particle& p){
 					auto Node_1 = FindNearestNode(vel_1D, post_collision_velocities.first);
 					auto Node_2 = FindNearestNode(vel_1D, post_collision_velocities.second);
 					if (Node_1.second && Node_2.second){
+						double cross_section = p.ComputeDataTypeValue(map<ParamsType, double>{{ParamsType::Energy, }});
+						double elem = factor * reletive_velocity * cross_section;
 						sourse(v_size*v_size*Node_1.first[2] + v_size*Node_1.first[1] + Node_1.first[0],
-								v_size*v_size*Node_2.first[2] + v_size*Node_2.first[1] + Node_2.first[0]) +=
-								factor * reletive_velocity;
-						runoff(v_size*v_size*k + v_size*l + m, (v_size * v_size * v_size - 1) / 2) +=
-								factor * reletive_velocity;
+								v_size*v_size*Node_2.first[2] + v_size*Node_2.first[1] + Node_2.first[0]) += elem;
+						runoff(v_size*v_size*k + v_size*l + m, (v_size * v_size * v_size - 1) / 2) += elem;
 					}
 				}
 			}
