@@ -2,7 +2,7 @@
 
 #include "space_grid.h"
 #include "velocity_grid.h"
-#include "Particles.h"
+#include "particles.h"
 #include <array>
 #include <set>
 #include <armadillo>
@@ -91,7 +91,7 @@ public:
 	cube ComputeFlax(size_t slice_index) const;
 
 private:
-	const Particle particle;            // particle data (mass, cross section)
+	const Particle particle;             // particle data (mass, cross section)
 	SpaceGrid space_grid;                // vector size of size_s
 	VelocityGrid velocity_grid;          // vector size of size_v
 	field<cube> distribution_function;   /* 3D DF preserved in 3D representation
