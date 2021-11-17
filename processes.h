@@ -6,6 +6,8 @@
 #include <iterator>
 #include <map>
 #include <algorithm>
+#include "distribution_func.h"
+#include "medium.h"
 
 using namespace arma;
 using namespace std;
@@ -40,17 +42,30 @@ enum class ParamsType{
 
 vec BuildLogVec(const double x, const size_t s);
 
-class ElementaryProcess{
+class PlasmaGasProcess{
 public:
-	ElementaryProcess(const ProcessType proc, const DataType data_type) : pt(proc), dt(data_type){}
+	PlasmaGasProcess(const ProcessType proc, const DataType data_type) : pt(proc), dt(data_type){}
 
-	virtual ~ElementaryProcess();
+	virtual ~PlasmaGasProcess();
 
-	virtual double ComputeDataTypeValue(const map<ParamsType, double>& params) const = 0;
+	virtual vectro<cube> ComputeRightHandSide(const Plasma& p, const DistributionFunction& df) const = 0;
 
 private:
-	const ProcessType pt;
-	const DataType dt;
+	ProcessType pt;
+	DataType dt;
+};
+
+class GasGasProcess{
+public:
+	GasGasProcess(const ProcessType proc, const DataType data_type) : pt(proc), dt(data_type){}
+
+	virtual ~GasGasProcess();
+
+	virtual cube ComputeRightHandSide(const DistributionFunction& df) const = 0;
+
+private:
+	ProcessType pt;
+	DataType dt;
 };
 
 class Hard_spheres_collision : public ElementaryProcess{
@@ -58,7 +73,7 @@ public:
 	Hard_spheres_collision(const double dcs) : ElementaryProcess(ProcessType::Hard_spheres_collision,
 			DataType::Hard_spheres_cross_section), diff_cross_section(dcs) {}
 
-	double ComputeDataTypeValue(const map<ParamsType, double>& params) const override{
+	double ComputeDataTypeValue() const override{
 		return diff_cross_section;
 	}
 
@@ -66,9 +81,9 @@ private:
 	double diff_cross_section;
 };
 
-class Charge_exchange : public ElementaryProcess{
+class Charge_exchange : public PlasmaGasProcess{
 public:
-	Charge_exchange(const string& path) : ElementaryProcess(ProcessType::Charge_exchange, DataType::Rate_coefficient) {
+	Charge_exchange(const string& path) : PlasmaGasProcess(ProcessType::Charge_exchange, DataType::Rate_coefficient) {
 		fstream file(path, ios_base::in);
 		if(file.is_open()){
 			string line;
@@ -105,9 +120,7 @@ public:
 		}
 	}
 
-	double ComputeDataTypeValue(const map<ParamsType, double>& params) const override{
-		double T = params.at(ParamsType::Temperature);
-		double E = params.at(ParamsType::Energy);
+	double ComputeRateCoeff(const double T, const double E) const{
 		double result = 0.0;
 		if((T_lims.second - T)*(T - T_lims.first) >= 0 and (E_lims.second - E)*(E - E_lims.first) >= 0){
 			result = exp(as_scalar(trans(BuildLogVec(T, fitting_params.n_cols))*fitting_params*BuildLogVec(E, fitting_params.n_rows)));
@@ -116,10 +129,42 @@ public:
 		return result;
 	}
 
+	void SetParams(const Plasma& p, const DistributionFunction& df){
+		double phase_volude = pow(df.GetVelGrid().GetGridStep(),3);
+		size_t v_size = df.GetVelGrid().GetSize();
+		vec vel_1D(df.GetVelGrid().Get1DGrid());
+
+		source_params(df.GetSpaceGrid().GetSize(), 0.0);
+		runoff_params(df.GetSpaceGrid().GetSize(), cube(v_size,v_size,v_size, fill::zeros));
+		double gas_mass = df.GetParticle().mass;
+		for(size_t i = 0; i < df.GetSpaceGrid().GetSize(); ++i){
+			for(size_t k = 0; k < v_size; ++k){
+				double sqr_vz = Sqr(vel_1D(k));
+				for(size_t l = 0; l < v_size; ++l){
+					double sqr_vy = Sqr(vel_1D(l));
+					for(size_t m = 0; m < v_size; ++m){
+						double sqr_vx = Sqr(vel_1D(m));
+						double energy = gas_mass * (sqr_vz + sqr_vy + sqr_vx) * 0.5;
+						source_params[i] += df.GetDistrSlice(i)(m,l,k) * ComputeRateCoeff(p.GetTemperature(i), energy);
+						runoff_params[i](m,l,k) = ComputeRateCoeff(p.GetTemperature(i), energy);
+					}
+				}
+			}
+			source_params[i] *= phase_volude;
+			runoff_params[i] *= p.GetDensity(i);
+		}
+	}
+
+	vector<cube> ComputeRightHandSide(const Plasma& p, const DistributionFunction& df, const size_t idx) const override{
+
+	}
+
 private:
 	mat fitting_params;
 	pair<double, double> T_lims;
 	pair<double, double> E_lims;
+	vector<double> source_params;
+	vector<cube> runoff_params;
 };
 
 class He_ionization : public ElementaryProcess{
@@ -135,13 +180,14 @@ public:
 		}
 	}
 
-	double ComputeDataTypeValue(const map<ParamsType, double>& params) const override{
-		double temperature = params.at(ParamsType::Temperature);
+	void SetTemperature(const double t){ T = t; }
+
+	double ComputeDataTypeValue() const override{
 		double T_min = fitting_params[0];
 		double T_max = fitting_params[1];
 		vector<double> logT_vec(fitting_params.size() - 2, 0.0);
-		if(T_max - temperature >= datum::eps and temperature - T_min >= datum::eps){
-			logT_vec[0] = log(temperature);
+		if( (T_max - T)*(T - T_min) >= 0 ){
+			logT_vec[0] = log(T);
 			for(size_t i = 1; i < logT_vec.size(); ++i){
 				logT_vec[i] = logT_vec[i-1] * logT_vec[0];
 			}
@@ -152,6 +198,7 @@ public:
 
 private:
 	vector<double> fitting_params;
+	double T = 0.0;
 };
 
 class He_elastic : public ElementaryProcess{
@@ -172,12 +219,14 @@ public:
 			throw logic_error(path + " : file not found");
 	}
 
-	double ComputeDataTypeValue(const map<ParamsType, double>& params) const override{
-		double temperature = params.at(ParamsType::Temperature);
-		double density = params.at(ParamsType::Density);
-		return 8.0 / (3 * sqrt(2 * datum::pi)) * datum::c_0 * 100 * density * temperature * temperature
-				* temperature / target_mass / sqrt(temperature / (datum::m_e * datum::c_0 * datum::c_0 / datum::eV) )
-				* ComputeIntOverEnergy(temperature);
+	void SetTemperature(const double t){ T = t; }
+
+	void SetDensity(const double d){ n = d; }
+
+	double ComputeDataTypeValue() const override{
+		return 8.0 / (3 * sqrt(2 * datum::pi)) * datum::c_0 * 100 * n * T * T
+				* T / target_mass / sqrt(T / (datum::m_e * datum::c_0 * datum::c_0 / datum::eV) )
+				* ComputeIntOverEnergy(T);
 	}
 
 private:
@@ -201,6 +250,8 @@ private:
 	double target_mass;
 	vector<double> energies;
 	vector<double> mt_cross_sections;
+	double T = 0.0;
+	double n = 0.0;
 };
 
 class HH_elastic : public ElementaryProcess{
@@ -226,10 +277,12 @@ public:
 			throw logic_error(path + " : file not found");
 	}
 
-	double ComputeDataTypeValue(const map<ParamsType, double>& params) const override{
-		double energy = params.at(ParamsType::Energy);
-		double angle = params.at(ParamsType::Angle);
-		auto upper_bound_energy = upper_bound(energies.begin(), energies.end(), energy);
+	void SetEnergy(const double e){ E = e; }
+
+	void SetAngle(const double theta){ angle = theta; }
+
+	double ComputeDataTypeValue() const override{
+		auto upper_bound_energy = upper_bound(energies.begin(), energies.end(), E);
 		if(upper_bound_energy == energies.end()){
 			return FittingFunction(energies.size()-1, angle);
 		}
@@ -240,7 +293,7 @@ public:
 		double upper_cross_section = FittingFunction(upper_index, angle);
 		double lower_cross_section = FittingFunction(upper_index - 1, angle);
 		return lower_cross_section
-				+ (energy - energies[upper_index-1]) / (energies[upper_index] - energies[upper_index-1])
+				+ (E - energies[upper_index-1]) / (energies[upper_index] - energies[upper_index-1])
 				* (upper_cross_section - lower_cross_section);
 	}
 
@@ -271,8 +324,6 @@ private:
 
 	map<size_t, vector<vector<double>>> energy_idx_to_coeff;
 	vector<double> energies;
+	double E = 0.0;
+	double angle = 0.0;
 };
-
-vec BuildLinearCoeff(const ElementaryProcess& ep){
-	ep.ComputeDataTypeValue(params);
-}
