@@ -48,7 +48,7 @@ public:
 
 	virtual ~PlasmaGasProcess();
 
-	virtual vectro<cube> ComputeRightHandSide(const Plasma& p, const DistributionFunction& df) const = 0;
+	virtual vector<cube> ComputeRightHandSide(const Plasma& p, const DistributionFunction& df) const = 0;
 
 private:
 	ProcessType pt;
@@ -120,21 +120,10 @@ public:
 		}
 	}
 
-	double ComputeRateCoeff(const double T, const double E) const{
-		double result = 0.0;
-		if((T_lims.second - T)*(T - T_lims.first) >= 0 and (E_lims.second - E)*(E - E_lims.first) >= 0){
-			result = exp(as_scalar(trans(BuildLogVec(T, fitting_params.n_cols))*fitting_params*BuildLogVec(E, fitting_params.n_rows)));
-		}else
-			throw out_of_range("T or E is out of limits");
-		return result;
-	}
-
-	void SetParams(const Plasma& p, const DistributionFunction& df){
-		double phase_volude = pow(df.GetVelGrid().GetGridStep(),3);
+	void SetRunoffParam(const Plasma& p, const DistributionFunction& df){
 		size_t v_size = df.GetVelGrid().GetSize();
 		vec vel_1D(df.GetVelGrid().Get1DGrid());
 
-		source_params(df.GetSpaceGrid().GetSize(), 0.0);
 		runoff_params(df.GetSpaceGrid().GetSize(), cube(v_size,v_size,v_size, fill::zeros));
 		double gas_mass = df.GetParticle().mass;
 		for(size_t i = 0; i < df.GetSpaceGrid().GetSize(); ++i){
@@ -145,31 +134,69 @@ public:
 					for(size_t m = 0; m < v_size; ++m){
 						double sqr_vx = Sqr(vel_1D(m));
 						double energy = gas_mass * (sqr_vz + sqr_vy + sqr_vx) * 0.5;
-						source_params[i] += df.GetDistrSlice(i)(m,l,k) * ComputeRateCoeff(p.GetTemperature(i), energy);
 						runoff_params[i](m,l,k) = ComputeRateCoeff(p.GetTemperature(i), energy);
 					}
 				}
 			}
-			source_params[i] *= phase_volude;
 			runoff_params[i] *= p.GetDensity(i);
 		}
 	}
 
-	vector<cube> ComputeRightHandSide(const Plasma& p, const DistributionFunction& df, const size_t idx) const override{
-
+	vector<cube> ComputeRightHandSide(const Plasma& p, const DistributionFunction& df) const override{
+		size_t v_size = df.GetVelGrid().GetSize();
+		size_t x_size = df.GetSpaceGrid().GetSize();
+		vector<cube> rhs(x_size, cube(v_size,v_size,v_size, fill::zeros));
+		vector<double> source_params = ComputeSourceParam(p, df);
+		for(size_t i = 0; i < x_size; ++i){
+			rhs[i] = source_params[i] * p.MakeMaxwellDistr(i, df.GetVelGrid().Get1DGrid())
+					- runoff_params[i] * df.GetDistrSlice(i);
+		}
+		return rhs;
 	}
 
 private:
+	double ComputeRateCoeff(const double T, const double E) const{
+		double result = 0.0;
+		if((T_lims.second - T)*(T - T_lims.first) >= 0 and (E_lims.second - E)*(E - E_lims.first) >= 0){
+			result = exp(as_scalar(trans(BuildLogVec(T, fitting_params.n_cols))*fitting_params*BuildLogVec(E, fitting_params.n_rows)));
+		}else
+			throw out_of_range("T or E is out of limits");
+		return result;
+	}
+
+	vector<double> ComputeSourceParam(const Plasma& p, const DistributionFunction& df) const{
+		double phase_volude = pow(df.GetVelGrid().GetGridStep(),3);
+		size_t v_size = df.GetVelGrid().GetSize();
+		vec vel_1D(df.GetVelGrid().Get1DGrid());
+
+		vector<double> source_params(df.GetSpaceGrid().GetSize(), 0.0);
+		double gas_mass = df.GetParticle().mass;
+		for(size_t i = 0; i < df.GetSpaceGrid().GetSize(); ++i){
+			for(size_t k = 0; k < v_size; ++k){
+				double sqr_vz = Sqr(vel_1D(k));
+				for(size_t l = 0; l < v_size; ++l){
+					double sqr_vy = Sqr(vel_1D(l));
+					for(size_t m = 0; m < v_size; ++m){
+						double sqr_vx = Sqr(vel_1D(m));
+						double energy = gas_mass * (sqr_vz + sqr_vy + sqr_vx) * 0.5;
+						source_params[i] += df.GetDistrSlice(i)(m,l,k) * ComputeRateCoeff(p.GetTemperature(i), energy);
+					}
+				}
+			}
+			source_params[i] *= phase_volude;
+		}
+		return source_params;
+	}
+
 	mat fitting_params;
 	pair<double, double> T_lims;
 	pair<double, double> E_lims;
-	vector<double> source_params;
 	vector<cube> runoff_params;
 };
 
-class He_ionization : public ElementaryProcess{
+class He_ionization : public PlasmaGasProcess{
 public:
-	He_ionization(const string& path) : ElementaryProcess(ProcessType::He_Ionization, DataType::Rate_coefficient){
+	He_ionization(const string& path) : PlasmaGasProcess(ProcessType::He_Ionization, DataType::Rate_coefficient){
 		fstream file(path, ios_base::in);
 		if(file.is_open()){
 			string line;
@@ -180,9 +207,24 @@ public:
 		}
 	}
 
-	void SetTemperature(const double t){ T = t; }
+	void SetRunoffParams(const Plasma& p){
+		runoff_params(p.GetSpaceSize(), 0.0);
+		for(size_t i = 0; i < p.GetSpaceSize(); ++i){
+			runoff_params[i] = ComputeRateCoeff(p.GetTemperature(i)) * p.GetDensity(i);
+		}
+	}
 
-	double ComputeDataTypeValue() const override{
+	vector<cube> ComputeRightHandSide(const Plasma& p, const DistributionFunction& df) const override{
+		size_t v_size = df.GetVelGrid().GetSize();
+		vector<cube> rhs(p.GetSpaceSize(), cube(v_size,v_size,v_size, fill::zeros ));
+		for(size_t i = 0; i < p.GetSpaceSize(); ++i){
+			rhs[i] = - runoff_params[i] * df.GetDistrSlice(i);
+		}
+		return rhs;
+	}
+
+private:
+	double ComputeRateCoeff(const double T) const{
 		double T_min = fitting_params[0];
 		double T_max = fitting_params[1];
 		vector<double> logT_vec(fitting_params.size() - 2, 0.0);
@@ -196,14 +238,13 @@ public:
 		return exp(inner_product(fitting_params.begin() + 2, fitting_params.end(), logT_vec.begin(), 0.0));
 	}
 
-private:
 	vector<double> fitting_params;
-	double T = 0.0;
+	vector<double> runoff_params;
 };
 
-class He_elastic : public ElementaryProcess{
+class He_elastic : public PlasmaGasProcess{
 public:
-	He_elastic(const string& path, const double target_mass_) : ElementaryProcess(ProcessType::He_elastic, DataType::Diffusion_coefficient),
+	He_elastic(const string& path, const double target_mass_) : PlasmaGasProcess(ProcessType::He_elastic, DataType::Diffusion_coefficient),
 	target_mass(target_mass_) {
 		fstream file(path, ios_base::in);
 		if(file.is_open()){
@@ -219,14 +260,46 @@ public:
 			throw logic_error(path + " : file not found");
 	}
 
-	void SetTemperature(const double t){ T = t; }
+	void SetDiffusCoeff(const Plasma& p){
+		diffus_coeff(p.GetSpaceSize(), 0.0);
+		for(size_t i = 0; i < p.GetSpaceSize(); ++i){
+			double T = p.GetTemperature(i);
+			diffus_coeff[i] = 8.0 / (3 * sqrt(2 * datum::pi)) * datum::c_0 * 100 * p.GetDensity(i) * Sqr(T)
+					* T / target_mass / sqrt(T / (datum::m_e * datum::c_0 * datum::c_0 / datum::eV) )
+					* ComputeIntOverEnergy(T);
+		}
+	}
 
-	void SetDensity(const double d){ n = d; }
-
-	double ComputeDataTypeValue() const override{
-		return 8.0 / (3 * sqrt(2 * datum::pi)) * datum::c_0 * 100 * n * T * T
-				* T / target_mass / sqrt(T / (datum::m_e * datum::c_0 * datum::c_0 / datum::eV) )
-				* ComputeIntOverEnergy(T);
+	vector<cube> ComputeRightHandSide(const Plasma& p, const DistributionFunction& df) const override{
+		size_t v_size = df.GetVelGrid().GetSize();
+		vec vel_1D(df.GetVelGrid().Get1DGrid());
+		double vel_step = df.GetVelGrid().GetGridStep();
+		vector<cube> rhs(p.GetSpaceSize(), cube(v_size,v_size,v_size, fill::zeros));
+		for(size_t i = 0; i < p.GetSpaceSize(); ++i){
+			double sqr_termal_vel = p.GetTemperature(i) / target_mass;
+			for(size_t k = 0; k < v_size; ++k){
+				double v_z = vel_1D(k);
+				for(size_t l = 0; l < v_size; ++l){
+					double v_y = vel_1D(l);
+					for(size_t m = 0; m < v_size; ++m){
+						double v_x = vel_1D(m);
+						double f_x_plus = (m == v_size - 1) ? 0 : df.GetDistrSlice(i)(m+1,l,k);
+						double f_x_minus = (m == 0) ? 0 : df.GetDistrSlice(i)(m-1,l,k);
+						double f_y_plus = (l == v_size - 1) ? 0 : df.GetDistrSlice(i)(m,l+1,k);
+						double f_y_minus = (l == 0) ? 0 : df.GetDistrSlice(i)(m,l-1,k);
+						double f_z_plus = (k == v_size - 1) ? 0 : df.GetDistrSlice(i)(m,l,k+1);
+						double f_z_minus = (k == 0) ? 0 : df.GetDistrSlice(i)(m,l,k-1);
+						rhs[i](m,l,k) = v_x / (sqr_termal_vel * 2 * vel_step) * (f_x_plus - f_x_minus)
+								+ v_y / (sqr_termal_vel * 2 * vel_step) * (f_y_plus - f_y_minus)
+								+ v_z / (sqr_termal_vel * 2 * vel_step) * (f_z_plus - f_z_minus)
+								+ Sqr(datum::c_0 * 100 / vel_step) * (f_x_plus + f_y_plus + f_z_plus + f_x_minus + f_y_minus + f_z_minus);
+					}
+				}
+			}
+			rhs[i] += (3 / sqr_termal_vel - 2 * Sqr( datum::c_0 * 100 / vel_step)) * df.GetDistrSlice(i);
+			rhs[i] *= diffus_coeff[i] / target_mass;
+		}
+		return rhs;
 	}
 
 private:
@@ -250,13 +323,12 @@ private:
 	double target_mass;
 	vector<double> energies;
 	vector<double> mt_cross_sections;
-	double T = 0.0;
-	double n = 0.0;
+	vector<double> diffus_coeff;
 };
 
-class HH_elastic : public ElementaryProcess{
+class HHplus_elastic : public PlasmaGasProcess{
 public:
-	HH_elastic(const ProcessType proc, const string& path) : ElementaryProcess(proc, DataType::Differential_cross_section){
+	HHplus_elastic(const string& path) : PlasmaGasProcess(ProcessType::Hp_elastic, DataType::Differential_cross_section){
 		fstream file(path, ios_base::in);
 		if(file.is_open()){
 			string line;
@@ -277,9 +349,7 @@ public:
 			throw logic_error(path + " : file not found");
 	}
 
-	void SetEnergy(const double e){ E = e; }
-
-	void SetAngle(const double theta){ angle = theta; }
+	void SetCollisions_mat(const vec& vel_1D);
 
 	double ComputeDataTypeValue() const override{
 		auto upper_bound_energy = upper_bound(energies.begin(), energies.end(), E);
@@ -324,6 +394,7 @@ private:
 
 	map<size_t, vector<vector<double>>> energy_idx_to_coeff;
 	vector<double> energies;
+	mat collisions_mat;
 	double E = 0.0;
 	double angle = 0.0;
 };
