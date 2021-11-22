@@ -9,6 +9,7 @@
 #include "distribution_func.h"
 #include "medium.h"
 #include "collisions.h"
+#include "elastic_collisions.h"
 
 using namespace arma;
 using namespace std;
@@ -62,24 +63,11 @@ public:
 
 	virtual ~GasGasProcess();
 
-	virtual cube ComputeRightHandSide(const DistributionFunction& df) const = 0;
+	virtual vector<cube> ComputeRightHandSide(const DistributionFunction& df) const = 0;
 
 private:
 	ProcessType pt;
 	DataType dt;
-};
-
-class Hard_spheres_collision : public ElementaryProcess{
-public:
-	Hard_spheres_collision(const double dcs) : ElementaryProcess(ProcessType::Hard_spheres_collision,
-			DataType::Hard_spheres_cross_section), diff_cross_section(dcs) {}
-
-	double ComputeDataTypeValue() const override{
-		return diff_cross_section;
-	}
-
-private:
-	double diff_cross_section;
 };
 
 class Charge_exchange : public PlasmaGasProcess{
@@ -389,9 +377,32 @@ public:
 		mat G = move(sourse) - move(runoff);
 		vector<cube> plasma_distr(p.GetSpaceSize(), cube(v_size, v_size, v_size, fill::zeros));
 		for(size_t i = 0; i < p.GetSpaceSize(); ++i){
-			plasma_distr[i] = p.MakeMaxwellDistr(i, pl_vel_1D);
+			for(size_t k = 0; k < v_size; ++k){
+				for(size_t l = 0; l < v_size; ++l){
+					for(size_t m = 0; m < v_size; ++m){
+						cube df_shift = DFShiftProcedure(p.MakeMaxwellDistr(i, pl_vel_1D), {m, l, k});
+						collisions_mat[i] = join_vert(collisions_mat[i], vectorise(df_shift).t()*G);
+					}
+				}
+			}
 		}
+	}
 
+	vector<cube> ComputeRightHandSide(const Plasma& p, const DistributionFunction& df) const override{
+		size_t x_size = df.GetSpaceGrid().GetSize();
+		size_t v_size = df.GetVelGrid().GetSize();
+		vector<cube> result(x_size, cube(v_size,v_size,v_size,fill::zeros));
+		for(size_t i = 0; i < x_size; ++i){
+			for(size_t k = 0; k < v_size; ++k){
+				for(size_t l = 0; l < v_size; ++l){
+					for(size_t m = 0; m < v_size; ++m){
+						cube df_shift = DFShiftProcedure(df.GetDistrSlice(i), {m, l, k});
+						result[i](m,l,k) = dot(collisions_mat[i].row(k*v_size*v_size + l*v_size +m),vectorise(df_shift));
+					}
+				}
+			}
+		}
+		return result;
 	}
 
 private:
@@ -422,10 +433,7 @@ private:
 			if(i < coeffs[0].size() and i != 0)
 				first_log_vec[i] = ln_angle * first_log_vec[i-1];
 			if(i < coeffs[1].size()){
-				if(i != 0)
-					second_log_vec[i] = ln_angle * second_log_vec[i-1];
-				else
-					second_log_vec[i] = ln_angle;
+				second_log_vec[i] = i != 0 ? ln_angle * second_log_vec[i-1] : ln_angle;
 			}
 		}
 		return (coeffs[2][0] + coeffs[2][1]*(1 - cos_angle) + coeffs[2][1]*sin_angle*sin_angle)
@@ -438,4 +446,174 @@ private:
 	map<size_t, vector<vector<double>>> energy_idx_to_coeff;
 	vector<double> energies;
 	vector<mat> collisions_mat;
+};
+
+class Hard_spheres_collision : public GasGasProcess{
+public:
+	Hard_spheres_collision(const double dcs) : GasGasProcess(ProcessType::Hard_spheres_collision,
+			DataType::Hard_spheres_cross_section), diff_cross_section(dcs) {}
+
+	void SetCollisions_mat(const VelocityGrid& v){
+		size_t v_size = v.GetSize();
+		size_t N_angle = 500;
+		double phase_volume = pow(v.GetGridStep(),3);
+		vec vel_1D(v.Get1DGrid());
+		mat sourse(v_size * v_size * v_size, v_size * v_size * v_size, fill::zeros);
+		mat runoff(sourse);
+		double factor = phase_volume * 4 * datum::pi / N_angle * diff_cross_section;
+		for(size_t k = 0; k < v_size; ++k){
+			for(size_t l = 0; l < v_size; ++l){
+				for(size_t m = 0; m < v_size; ++m){
+					vec3 second_particle_velocity = {vel_1D(m), vel_1D(l), vel_1D(k)};
+					double reletive_velocity = sqrt(Sqr(second_particle_velocity(0))
+							+ Sqr(second_particle_velocity(1))
+							+ Sqr(second_particle_velocity(2)));
+					double CM_energy = datum::m_p * Sqr(reletive_velocity) * 0.25 / datum::eV;
+					vector<vec3> sphere_points;
+					if(array<size_t,3>({m, l, k}) != array<size_t,3>({0, 0, 0})){
+						sphere_points = ScatteringSphere(N_angle, second_particle_velocity, {0,0,0});
+					}
+					for(auto& point : sphere_points){
+						pair<vec3, vec3> post_collision_velocities = PostCollisionVelocities(second_particle_velocity, point, reletive_velocity, 0.0);
+						auto Node_1 = FindNearestNode(vel_1D, post_collision_velocities.first);
+						auto Node_2 = FindNearestNode(vel_1D, post_collision_velocities.second);
+						double elem = factor * reletive_velocity;
+						if (Node_1.second && Node_2.second){
+							sourse(v_size*v_size*Node_1.first[2] + v_size*Node_1.first[1] + Node_1.first[0],
+									v_size*v_size*Node_2.first[2] + v_size*Node_2.first[1] + Node_2.first[0]) += elem;
+							runoff(v_size*v_size*k + v_size*l + m, (v_size * v_size * v_size - 1) / 2) += elem;
+						}
+					}
+				}
+			}
+		}
+		collisions_mat = move(sourse) - move(runoff);
+	}
+
+	vector<cube> ComputeRightHandSide(const DistributionFunction& df) const override{
+		size_t x_size = df.GetSpaceGrid().GetSize();
+		size_t v_size = df.GetVelGrid().GetSize();
+		vector<cube> result(x_size, cube(v_size,v_size,v_size,fill::zeros));
+		for(size_t i = 0; i < x_size; ++i){
+			result[i] = ComputeCollisionsIntegral(df.GetDistrSlice(i), collisions_mat, df.GetVelGrid(), true);
+		}
+		return result;
+	}
+
+private:
+	double diff_cross_section;
+	mat collisions_mat;
+};
+
+class HH_elastic : public GasGasProcess{
+public:
+	HH_elastic(const string& path) : PlasmaGasProcess(ProcessType::HH_elastic, DataType::Differential_cross_section){
+		fstream file(path, ios_base::in);
+		if(file.is_open()){
+			string line;
+			while(getline(file, line)){
+				istringstream buffer(line);
+				energies.push_back(*istream_iterator<double>(buffer));
+				vector<vector<double>> current_params;
+				for(size_t i = 0; i < 3; ++i){
+					getline(file, line);
+					istringstream tmp_buffer(line);
+					vector<double> param((istream_iterator<double>(tmp_buffer)),
+							istream_iterator<double>());
+					current_params.push_back(param);
+				}
+				energy_idx_to_coeff[energies.size()-1] = current_params;
+			}
+		}else
+			throw logic_error(path + " : file not found");
+	}
+
+	void SetCollisions_mat(const VelocityGrid& v){
+		size_t v_size = v.GetSize();
+		size_t N_angle = 500;
+		double phase_volume = pow(v.GetGridStep(),3);
+		vec vel_1D(v.Get1DGrid());
+		mat sourse(v_size * v_size * v_size, v_size * v_size * v_size, fill::zeros);
+		mat runoff(sourse);
+		double factor = phase_volume * 4 * datum::pi / N_angle;
+		for(size_t k = 0; k < v_size; ++k){
+			for(size_t l = 0; l < v_size; ++l){
+				for(size_t m = 0; m < v_size; ++m){
+					vec3 second_particle_velocity = {vel_1D(m), vel_1D(l), vel_1D(k)};
+					double reletive_velocity = sqrt(Sqr(second_particle_velocity(0))
+							+ Sqr(second_particle_velocity(1))
+							+ Sqr(second_particle_velocity(2)));
+					double CM_energy = datum::m_p * Sqr(reletive_velocity) * 0.25 / datum::eV;
+					vector<vec3> sphere_points;
+					if(array<size_t,3>({m, l, k}) != array<size_t,3>({0, 0, 0})){
+						sphere_points = ScatteringSphere(N_angle, second_particle_velocity, {0,0,0});
+					}
+					for(auto& point : sphere_points){
+						pair<vec3, vec3> post_collision_velocities = PostCollisionVelocities(second_particle_velocity, point, reletive_velocity, 0.0);
+						auto Node_1 = FindNearestNode(vel_1D, post_collision_velocities.first);
+						auto Node_2 = FindNearestNode(vel_1D, post_collision_velocities.second);
+						double elem = factor * reletive_velocity * ComputeDiffCross(CM_energy, acos(norm_dot(point, -second_particle_velocity)));
+						if (Node_1.second && Node_2.second){
+							sourse(v_size*v_size*Node_1.first[2] + v_size*Node_1.first[1] + Node_1.first[0],
+									v_size*v_size*Node_2.first[2] + v_size*Node_2.first[1] + Node_2.first[0]) += elem;
+							runoff(v_size*v_size*k + v_size*l + m, (v_size * v_size * v_size - 1) / 2) += elem;
+						}
+					}
+				}
+			}
+		}
+		collisions_mat = move(sourse) - move(runoff);
+	}
+
+	vector<cube> ComputeRightHandSide(const DistributionFunction& df) const override{
+		size_t x_size = df.GetSpaceGrid().GetSize();
+		size_t v_size = df.GetVelGrid().GetSize();
+		vector<cube> result(x_size, cube(v_size,v_size,v_size,fill::zeros));
+		for(size_t i = 0; i < x_size; ++i){
+			result[i] = ComputeCollisionsIntegral(df.GetDistrSlice(i), collisions_mat, df.GetVelGrid(), true);
+		}
+		return result;
+	}
+
+private:
+	double ComputeDiffCross(const double E, const double angle) const{
+		auto upper_bound_energy = upper_bound(energies.begin(), energies.end(), E);
+		if(upper_bound_energy == energies.end()){
+			return FittingFunction(energies.size()-1, angle);
+		}
+		size_t upper_index = upper_bound_energy - energies.begin();
+		if(upper_index == 0){
+			return FittingFunction(0, angle);
+		}
+		double upper_cross_section = FittingFunction(upper_index, angle);
+		double lower_cross_section = FittingFunction(upper_index - 1, angle);
+		return lower_cross_section
+				+ (E - energies[upper_index-1]) / (energies[upper_index] - energies[upper_index-1])
+				* (upper_cross_section - lower_cross_section);
+	}
+
+	double FittingFunction(const size_t E_index, const double angle) const{
+		vector<vector<double>> coeffs = energy_idx_to_coeff.at(E_index);
+		double cos_angle = cos(angle);
+		double sin_angle = sin(angle);
+		double ln_angle = log(angle);
+		vector<double> first_log_vec(coeffs[0].size(), 1.0);
+		vector<double> second_log_vec(coeffs[1].size(), 1.0);
+		for(size_t i = 0; i < max(coeffs[0].size(), coeffs[1].size()); ++i){
+			if(i < coeffs[0].size() and i != 0)
+				first_log_vec[i] = ln_angle * first_log_vec[i-1];
+			if(i < coeffs[1].size()){
+				second_log_vec[i] = i != 0 ? ln_angle * second_log_vec[i-1] : ln_angle;
+			}
+		}
+		return (coeffs[2][0] + coeffs[2][1]*(1 - cos_angle) + coeffs[2][1]*sin_angle*sin_angle)
+				/ (2*datum::pi*sin_angle)
+				* exp(inner_product(coeffs[0].begin(), coeffs[0].end(), first_log_vec.begin(), 0.0)
+						/ inner_product(coeffs[1].begin(), coeffs[1].end(), second_log_vec.begin(), 1.0))
+				* datum::a_0 * datum::a_0 * 1e4;
+	}
+
+	map<size_t, vector<vector<double>>> energy_idx_to_coeff;
+	vector<double> energies;
+	mat collisions_mat;
 };
