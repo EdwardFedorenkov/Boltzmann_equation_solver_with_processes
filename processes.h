@@ -50,7 +50,7 @@ public:
 
 	virtual ~PlasmaGasProcess();
 
-	virtual vector<cube> ComputeRightHandSide(const Plasma& p, const DistributionFunction& df) const = 0;
+	virtual vector<cube> ComputePGRightHandSide(const Plasma& p, const DistributionFunction& df) const = 0;
 
 private:
 	ProcessType pt;
@@ -63,7 +63,7 @@ public:
 
 	virtual ~GasGasProcess();
 
-	virtual vector<cube> ComputeRightHandSide(const DistributionFunction& df) const = 0;
+	virtual vector<cube> ComputeGGRightHandSide(const DistributionFunction& df) const = 0;
 
 private:
 	ProcessType pt;
@@ -113,8 +113,8 @@ public:
 		size_t v_size = df.GetVelGrid().GetSize();
 		vec vel_1D(df.GetVelGrid().Get1DGrid());
 
-		runoff_params(df.GetSpaceGrid().GetSize(), cube(v_size,v_size,v_size, fill::zeros));
-		double gas_mass = df.GetParticle().mass;
+		runoff_params = vector<cube>(df.GetSpaceGrid().GetSize(), cube(v_size,v_size,v_size, fill::zeros));
+		double gas_mass = df.GetParticleMass();
 		for(size_t i = 0; i < df.GetSpaceGrid().GetSize(); ++i){
 			for(size_t k = 0; k < v_size; ++k){
 				double sqr_vz = Sqr(vel_1D(k));
@@ -131,14 +131,14 @@ public:
 		}
 	}
 
-	vector<cube> ComputeRightHandSide(const Plasma& p, const DistributionFunction& df) const override{
+	vector<cube> ComputePGRightHandSide(const Plasma& p, const DistributionFunction& df) const override{
 		size_t v_size = df.GetVelGrid().GetSize();
 		size_t x_size = df.GetSpaceGrid().GetSize();
 		vector<cube> rhs(x_size, cube(v_size,v_size,v_size, fill::zeros));
 		vector<double> source_params = ComputeSourceParam(p, df);
 		for(size_t i = 0; i < x_size; ++i){
 			rhs[i] = source_params[i] * p.MakeMaxwellDistr(i, df.GetVelGrid().Get1DGrid())
-					- runoff_params[i] * df.GetDistrSlice(i);
+					- runoff_params[i] % df.GetDistrSlice(i);
 		}
 		return rhs;
 	}
@@ -159,7 +159,7 @@ private:
 		vec vel_1D(df.GetVelGrid().Get1DGrid());
 
 		vector<double> source_params(df.GetSpaceGrid().GetSize(), 0.0);
-		double gas_mass = df.GetParticle().mass;
+		double gas_mass = df.GetParticleMass();
 		for(size_t i = 0; i < df.GetSpaceGrid().GetSize(); ++i){
 			for(size_t k = 0; k < v_size; ++k){
 				double sqr_vz = Sqr(vel_1D(k));
@@ -197,13 +197,13 @@ public:
 	}
 
 	void SetRunoffParams(const Plasma& p){
-		runoff_params(p.GetSpaceSize(), 0.0);
+		runoff_params = vector<double>(p.GetSpaceSize(), 0.0);
 		for(size_t i = 0; i < p.GetSpaceSize(); ++i){
 			runoff_params[i] = ComputeRateCoeff(p.GetTemperature(i)) * p.GetDensity(i);
 		}
 	}
 
-	vector<cube> ComputeRightHandSide(const Plasma& p, const DistributionFunction& df) const override{
+	vector<cube> ComputePGRightHandSide(const Plasma& p, const DistributionFunction& df) const override{
 		size_t v_size = df.GetVelGrid().GetSize();
 		vector<cube> rhs(p.GetSpaceSize(), cube(v_size,v_size,v_size, fill::zeros ));
 		for(size_t i = 0; i < p.GetSpaceSize(); ++i){
@@ -250,7 +250,7 @@ public:
 	}
 
 	void SetDiffusCoeff(const Plasma& p){
-		diffus_coeff(p.GetSpaceSize(), 0.0);
+		diffus_coeff = vector<double>(p.GetSpaceSize(), 0.0);
 		for(size_t i = 0; i < p.GetSpaceSize(); ++i){
 			double T = p.GetTemperature(i);
 			diffus_coeff[i] = 8.0 / (3 * sqrt(2 * datum::pi)) * datum::c_0 * 100 * p.GetDensity(i) * Sqr(T)
@@ -259,7 +259,7 @@ public:
 		}
 	}
 
-	vector<cube> ComputeRightHandSide(const Plasma& p, const DistributionFunction& df) const override{
+	vector<cube> ComputePGRightHandSide(const Plasma& p, const DistributionFunction& df) const override{
 		size_t v_size = df.GetVelGrid().GetSize();
 		vec vel_1D(df.GetVelGrid().Get1DGrid());
 		double vel_step = df.GetVelGrid().GetGridStep();
@@ -388,7 +388,7 @@ public:
 		}
 	}
 
-	vector<cube> ComputeRightHandSide(const Plasma& p, const DistributionFunction& df) const override{
+	vector<cube> ComputePGRightHandSide(const Plasma& p, const DistributionFunction& df) const override{
 		size_t x_size = df.GetSpaceGrid().GetSize();
 		size_t v_size = df.GetVelGrid().GetSize();
 		vector<cube> result(x_size, cube(v_size,v_size,v_size,fill::zeros));
@@ -468,7 +468,6 @@ public:
 					double reletive_velocity = sqrt(Sqr(second_particle_velocity(0))
 							+ Sqr(second_particle_velocity(1))
 							+ Sqr(second_particle_velocity(2)));
-					double CM_energy = datum::m_p * Sqr(reletive_velocity) * 0.25 / datum::eV;
 					vector<vec3> sphere_points;
 					if(array<size_t,3>({m, l, k}) != array<size_t,3>({0, 0, 0})){
 						sphere_points = ScatteringSphere(N_angle, second_particle_velocity, {0,0,0});
@@ -490,7 +489,7 @@ public:
 		collisions_mat = move(sourse) - move(runoff);
 	}
 
-	vector<cube> ComputeRightHandSide(const DistributionFunction& df) const override{
+	vector<cube> ComputeGGRightHandSide(const DistributionFunction& df) const override{
 		size_t x_size = df.GetSpaceGrid().GetSize();
 		size_t v_size = df.GetVelGrid().GetSize();
 		vector<cube> result(x_size, cube(v_size,v_size,v_size,fill::zeros));
@@ -507,7 +506,7 @@ private:
 
 class HH_elastic : public GasGasProcess{
 public:
-	HH_elastic(const string& path) : PlasmaGasProcess(ProcessType::HH_elastic, DataType::Differential_cross_section){
+	HH_elastic(const string& path) : GasGasProcess(ProcessType::HH_elastic, DataType::Differential_cross_section){
 		fstream file(path, ios_base::in);
 		if(file.is_open()){
 			string line;
@@ -565,7 +564,7 @@ public:
 		collisions_mat = move(sourse) - move(runoff);
 	}
 
-	vector<cube> ComputeRightHandSide(const DistributionFunction& df) const override{
+	vector<cube> ComputeGGRightHandSide(const DistributionFunction& df) const override{
 		size_t x_size = df.GetSpaceGrid().GetSize();
 		size_t v_size = df.GetVelGrid().GetSize();
 		vector<cube> result(x_size, cube(v_size,v_size,v_size,fill::zeros));

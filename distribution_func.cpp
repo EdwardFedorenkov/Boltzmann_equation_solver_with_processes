@@ -6,13 +6,13 @@
 
 
 DistributionFunction::DistributionFunction(const DistributionType distribution_type,
-		const Particle& p, const SpaceGrid& x, const VelocityGrid& v,
+		const double m, const SpaceGrid& x, const VelocityGrid& v,
 		const vector<double>& density, const vector<double>& temperature, const vector<vec3>& mean_vel) :
-		particle(p), space_grid(x), velocity_grid(v), distribution_function(field<cube>(x.GetSize())) {
+		mass(m), space_grid(x), velocity_grid(v), distribution_function(field<cube>(x.GetSize())) {
 	size_t v_size = v.GetSize();
 	size_t x_size = distribution_function.n_elem;
 	double termal_velocity;
-	double termal_vel_factor = sqrt(2.0 / particle.mass)*datum::c_0*100;
+	double termal_vel_factor = sqrt(2.0 / mass)*datum::c_0*100;
 	vector<double> vel_1D = v.Get1DGrid();
 
 	for(size_t i = 0; i < x_size; ++i){
@@ -42,13 +42,13 @@ DistributionFunction::DistributionFunction(const DistributionType distribution_t
 }
 
 DistributionFunction::DistributionFunction(const DistributionType distribution_type,
-		const Particle& p, const SpaceGrid& x, const VelocityGrid& v,
+		const double m, const SpaceGrid& x, const VelocityGrid& v,
 		vector<double>& density, vector<double>& temperature) :
-			particle(p), space_grid(x), velocity_grid(v), distribution_function(field<cube>(x.GetSize())){
+			mass(m), space_grid(x), velocity_grid(v), distribution_function(field<cube>(x.GetSize())){
 	size_t v_size = v.GetSize();
 	size_t x_size = distribution_function.n_elem;
 	double termal_velocity;
-	double termal_vel_factor = sqrt(2.0 / particle.mass)*datum::c_0*100;
+	double termal_vel_factor = sqrt(2.0 / mass)*datum::c_0*100;
 	vector<double> vel_1D = v.Get1DGrid();
 
 	for(size_t i = 0; i < x_size; ++i){
@@ -77,12 +77,12 @@ DistributionFunction::DistributionFunction(const DistributionType distribution_t
 	}
 }
 
-DistributionFunction::DistributionFunction(const field<cube>& df, const Particle& p, const SpaceGrid& x,
-		const VelocityGrid& v) : particle(p), space_grid(x), velocity_grid(v), distribution_function(df){}
+DistributionFunction::DistributionFunction(const field<cube>& df, const double m, const SpaceGrid& x,
+		const VelocityGrid& v) : mass(m), space_grid(x), velocity_grid(v), distribution_function(df){}
 
-DistributionFunction::DistributionFunction(const DistributionType distribution_type, const Particle& p, const VelocityGrid& v,
+DistributionFunction::DistributionFunction(const DistributionType distribution_type, const double m, const VelocityGrid& v,
 		const double density, const double temperature) :
-		particle(p), space_grid(), velocity_grid(v){
+		mass(m), space_grid(), velocity_grid(v){
 	if(distribution_type == DistributionType::Maxwell){
 		distribution_function = {Maxwell(density, temperature)};
 	}else if(distribution_type == DistributionType::TestDistribution_1){
@@ -90,7 +90,7 @@ DistributionFunction::DistributionFunction(const DistributionType distribution_t
 	}
 }
 
-DistributionFunction::DistributionFunction(const cube& df, const Particle& p, const VelocityGrid& v) : particle(p), space_grid(), velocity_grid(v){
+DistributionFunction::DistributionFunction(const cube& df, const double m, const VelocityGrid& v) : mass(m), space_grid(), velocity_grid(v){
 	distribution_function = {df};
 };
 
@@ -134,7 +134,7 @@ vector<double> DistributionFunction::ComputeTemperature(const vector<vec3>& mean
 	double phase_volume = pow(velocity_grid.GetGridStep(),3);
 	for(size_t i = 0; i < x_size; ++i){
 		if(density[i] > datum::eps){
-			double factor = particle.mass * phase_volume / (3 * density[i] * Sqr(datum::c_0) * 1e4);
+			double factor = mass * phase_volume / (3 * density[i] * Sqr(datum::c_0) * 1e4);
 			for(size_t k = 0; k < v_size; ++k){
 				for(size_t l = 0; l < v_size; ++l){
 					for(size_t m = 0; m < v_size; ++m){
@@ -186,101 +186,35 @@ cube DistributionFunction::GetDistrSlice(const size_t index) const{
 	return distribution_function(index);
 }
 
-Particle DistributionFunction::GetParticle() const{
-	return particle;
+double DistributionFunction::GetParticleMass() const{
+	return mass;
 }
 
-void DistributionFunction::ChangeDFSliceValues(const cube& df_slice, size_t slice_index){
-	distribution_function(slice_index) = df_slice;
+double DistributionFunction::ComputeTransportTimeStep() const{
+	return 0.5 * space_grid.GetGridStep() / velocity_grid.GetMax();
 }
 
-double DistributionFunction::GetOneCollisionTime() const{
-	return 1 / (
-			max( vec(ComputeDensity()) %
-			sqrt(2 * vec(ComputeTemperatureStatic()) / particle.mass) * datum::c_0 * 100 *
-			particle.hard_speres_cross_section * 4 * datum::pi)
-			);
+void DistributionFunction::Save(const size_t space_position, const string& file_name) const{
+	distribution_function(space_position).save(file_name, raw_binary);
 }
 
-double DistributionFunction::ComputeTimeStep(const field<cube>& st, const double accuracy) const{
-	vec time_step(space_grid.GetSize(), fill::zeros);
-	double one_coll_time = GetOneCollisionTime();
+void DistributionFunction::ChangeDFbyTransport(){
 	for(size_t i = 0; i < space_grid.GetSize(); ++i){
-		cube time_steps = accuracy * distribution_function(i) / abs(st(i));
-		time_steps.transform([accuracy, one_coll_time](double val)
-				{ return ((val > datum::eps) and isfinite(val)) ? val : accuracy * one_coll_time; });
-		time_step(i) = time_steps.min();
+		distribution_function(i) += ComputeFlax(i) * ComputeTransportTimeStep() / space_grid.GetGridStep();
 	}
-	double collisions_time_step = min(time_step);
-	if(space_grid.GetSize() == 1){
-		return collisions_time_step;
-	}
-	return min(0.5 * space_grid.GetGridStep() / velocity_grid.GetMax(), collisions_time_step);
 }
 
-void DistributionFunction::SaveMatrix_x_vx(const size_t vy_position, const size_t vz_position, const size_t time_index) const{
-	size_t x_size = space_grid.GetSize();
-	size_t v_size = velocity_grid.GetSize();
-	mat result(v_size, x_size);
-	for(size_t i = 0; i < x_size; ++i){
-		for(size_t m = 0; m < v_size; ++m){
-			result(m,i) = distribution_function(i)(m,vy_position,vz_position);
-		}
-	}
-	result.save("vx_x" + to_string(time_index) + ".txt", raw_ascii);
-}
-
-void DistributionFunction::SaveMatrixes(const set<size_t>& free_pos, const size_t fixed_pos,
-		const size_t space_position, const string& file_name) const{
-	size_t v_size = velocity_grid.GetSize();
-	mat for_saving(v_size, v_size, fill::zeros);
-	for(size_t i = 0; i < v_size; ++i){
-		for(size_t j = 0; j < v_size; ++j){
-			if(free_pos.count(0) == 1 and free_pos.count(1) == 1){
-				for_saving(j,i) = distribution_function(space_position)(j,i,fixed_pos);
-			}else if(free_pos.count(1) == 1 and free_pos.count(2) == 1){
-				for_saving(j,i) = distribution_function(space_position)(fixed_pos,j,i);
-			}else if(free_pos.count(0) == 1 and free_pos.count(2) == 1){
-				for_saving(j,i) = distribution_function(space_position)(j,fixed_pos,i);
-			}
-		}
-	}
-	for_saving.save(file_name, raw_binary);
-}
-
-void DistributionFunction::ChangeDFbyTransport(size_t slice_index, double time_step){
-	distribution_function(slice_index) += ComputeFlax(slice_index) * time_step / space_grid.GetGridStep();
-}
-
-void DistributionFunction::RungeKutta2_ElasticCollisons(const mat& coll_mat, double time_step, size_t slice_index, bool Do_treatment){
-	cube first_coll_int = ComputeCollisionsIntegral(distribution_function(slice_index), coll_mat, velocity_grid, Do_treatment);
-	cube df_mid = distribution_function(slice_index) + time_step * first_coll_int;
-	cube second_coll_int = ComputeCollisionsIntegral(df_mid, coll_mat, velocity_grid, Do_treatment);
-	distribution_function(slice_index) += (second_coll_int + first_coll_int) * 0.5 * time_step ;
-}
-
-double DistributionFunction::TimeEvolution_SmartTimeStep(const mat& coll_mat, const double accuracy, bool Do_treatment){
-	field<cube> coll_ints(space_grid.GetSize());
+void DistributionFunction::ChangeDFbyProcess(const vector<cube>& rhs){
 	for(size_t i = 0; i < space_grid.GetSize(); ++i){
-		coll_ints(i) = ComputeCollisionsIntegral(distribution_function(i), coll_mat, velocity_grid, Do_treatment);
+		distribution_function(i) += rhs[i];
 	}
-	double time_step = ComputeTimeStep(coll_ints, accuracy);
-	if(space_grid.GetSize() > 1){
-		for(size_t i = 0; i < space_grid.GetSize(); ++i){
-			ChangeDFbyTransport(i, time_step);
-		}
-	}
-	for(size_t i = 0; i < space_grid.GetSize(); ++i){
-		distribution_function(i) += coll_ints(i) * time_step;
-	}
-	return time_step;
 }
 
 cube DistributionFunction::Maxwell(double density, double temperature) const{
 	size_t v_size = velocity_grid.GetSize();
 	vector<double> vel_1D = velocity_grid.Get1DGrid();
 	cube maxwell(v_size, v_size, v_size);
-	double sqr_termal_vel = 2 * temperature / particle.mass * datum::c_0 * datum::c_0 * 1e4;
+	double sqr_termal_vel = 2 * temperature / mass * datum::c_0 * datum::c_0 * 1e4;
 	double factor = density / pow(sqrt(datum::pi * sqr_termal_vel), 3);
 	for(size_t k = 0; k < v_size; ++k){
 		for(size_t l = 0; l < v_size; ++l){
@@ -296,7 +230,7 @@ cube DistributionFunction::TestDistribution_1(double density, double temperature
 	size_t v_size = velocity_grid.GetSize();
 	vector<double> vel_1D = velocity_grid.Get1DGrid();
 	cube distr(v_size, v_size, v_size);
-	double sqr_termal_vel = 2 * temperature / particle.mass * datum::c_0 * datum::c_0 * 1e4;
+	double sqr_termal_vel = 2 * temperature / mass * datum::c_0 * datum::c_0 * 1e4;
 	double factor = density / pow(sqrt(datum::pi * sqr_termal_vel), 3);
 	for(size_t k = 0; k < v_size; ++k){
 		for(size_t l = 0; l < v_size; ++l){
@@ -314,7 +248,7 @@ cube DistributionFunction::MaxwellReflectedHalf(double density, double temperatu
 	size_t mid_index = (v_size - 1) / 2;
 	vector<double> vel_1D = velocity_grid.Get1DGrid();
 	cube maxwell(v_size, v_size, v_size, fill::zeros);
-	double sqr_termal_vel = 2 * temperature / particle.mass * datum::c_0 * datum::c_0 * 1e4;
+	double sqr_termal_vel = 2 * temperature / mass * datum::c_0 * datum::c_0 * 1e4;
 	double factor = density / pow(sqrt(datum::pi * sqr_termal_vel), 3);
 	for(size_t k = 0; k < v_size; ++k){
 		for(size_t l = 0; l < v_size; ++l){

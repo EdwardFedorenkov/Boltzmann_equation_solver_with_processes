@@ -19,27 +19,33 @@ enum class DistributionType{
 class DistributionFunction{
 public:
 	DistributionFunction(const DistributionType distribution_type,
-			const Particle& p, const SpaceGrid& x,
+			const double m, const SpaceGrid& x,
 			const VelocityGrid& v,
 			const vector<double>& density, const vector<double>& temperature,
 			const vector<vec3>& mean_vel);
 
 	DistributionFunction(const DistributionType distribution_type,
-			const Particle& p, const SpaceGrid& x,
+			const double m, const SpaceGrid& x,
 			const VelocityGrid& v,
 			vector<double>& density, vector<double>& temperature);
 
-	DistributionFunction(const field<cube>& df, const Particle& p, const SpaceGrid& x,
+	DistributionFunction(const field<cube>& df, const double m, const SpaceGrid& x,
 			const VelocityGrid& v);
 
-	DistributionFunction(const cube& df, const Particle& p, const VelocityGrid& v);
+	DistributionFunction(const cube& df, const double m, const VelocityGrid& v);
 
-	DistributionFunction(const DistributionType distribution_type, const Particle& p, const VelocityGrid& v,
+	DistributionFunction(const DistributionType distribution_type, const double m, const VelocityGrid& v,
 			const double density, const double temperature);
 
 	VelocityGrid GetVelGrid() const;
 
 	SpaceGrid GetSpaceGrid() const;
+
+	field<cube> GetFullDistribution() const;
+
+	cube GetDistrSlice(const size_t index) const;
+
+	double GetParticleMass() const;
 
 	vector<double> ComputeDensity() const;
 
@@ -51,28 +57,13 @@ public:
 
 	vector<vec3> ComputeMeanVelocity() const;
 
-	field<cube> GetFullDistribution() const;
+	double ComputeTransportTimeStep() const;
 
-	cube GetDistrSlice(const size_t index) const;
+	void Save(const size_t space_position, const string& file_name) const;
 
-	Particle GetParticle() const;
+	void ChangeDFbyTransport();
 
-	double GetOneCollisionTime() const;
-
-	double ComputeTimeStep(const field<cube>& st, const double accuracy) const;
-
-	void SaveMatrix_x_vx(const size_t vy_position, const size_t vz_position, const size_t time_index) const;
-
-	void SaveMatrixes(const set<size_t>& xy_collection, const size_t z_position,
-			const size_t space_position, const string& file_name) const;
-
-	void ChangeDFSliceValues(const cube& df_slice_val, size_t slice_index);
-
-	void ChangeDFbyTransport(size_t slice_index, double time_step);
-
-	void RungeKutta2_ElasticCollisons(const mat& coll_mat, double time_step, size_t slice_index, bool Do_treatment);
-
-	double TimeEvolution_SmartTimeStep(const mat& coll_mat, const double accuracy, bool Do_treatment);
+	void ChangeDFbyProcess(const vector<cube>& rhs);
 
 	// ----Can be in private section----
 
@@ -91,7 +82,7 @@ public:
 	cube ComputeFlax(size_t slice_index) const;
 
 private:
-	const Particle particle;             // particle data (mass, cross section)
+	const double mass;             // particle data (mass)
 	SpaceGrid space_grid;                // vector size of size_s
 	VelocityGrid velocity_grid;          // vector size of size_v
 	field<cube> distribution_function;   /* 3D DF preserved in 3D representation

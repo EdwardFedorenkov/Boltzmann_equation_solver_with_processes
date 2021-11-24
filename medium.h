@@ -1,16 +1,14 @@
 #pragma once
 
-#include "distribution_func.h"
-#include "space_grid.h"
-#include "particles.h"
 #include <armadillo>
-#include <memory>
+#include <vector>
 
 using namespace arma;
+using namespace std;
 
 class Plasma{
 public:
-	Plasma(const ParticlesType pt, const vector<double>& T, const vector<double>& n);
+	Plasma(const double mass, const vector<double>& T, const vector<double>& n);
 
 	cube MakeMaxwellDistr(const size_t sg_idx, const vec& vel_1D) const;
 
@@ -26,20 +24,3 @@ private:
 	double ion_mass;
 };
 
-class Gas{
-public:
-	Gas(const DistributionFunction& distr, const vector<shared_ptr<PlasmaGasProcess>>& pg,
-			const vector<shared_ptr<GasGasProcess>>& gg) : df(distr), pg_processes(pg), gg_processes(gg){}
-
-	double ComputeTimeStep() const;
-
-	cube ComputeRightHandSide() const;
-
-	void TimeEvolution_SmartTimeStep() const;
-
-
-private:
-	DistributionFunction df;
-	vector<shared_ptr<PlasmaGasProcess>> pg_processes;
-	vector<shared_ptr<GasGasProcess>> gg_processes;
-};
