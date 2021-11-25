@@ -12,12 +12,9 @@
 #include "distribution_func.h"
 #include "elastic_collisions.h"
 #include "collisions.h"
-
-#include <iostream>
-#include <armadillo>
-#include <vector>
-using namespace std;
-using namespace arma;
+#include "processes.h"
+#include "medium.h"
+#include "gas.h"
 
 void TestVelocityGrid(){
 	VelocityGrid v(11,5);
@@ -46,10 +43,43 @@ void TestSpaceGrid(){
 	ASSERT_EQUAL(x.GetWalls().walls_T.second, 300 * datum::k_evk);
 }
 
+void SaveProcessData(const Plasma& p, const DistributionFunction& df){
+	Charge_exchange cx("ChargeExchange.txt", p, df);
+	He_ionization ioniz("ElectronIonization.txt", p);
+}
+
 int main() {
 	// Testing procedure
 	TestRunner tr;
 	RUN_TEST(tr, TestVelocityGrid);
 	RUN_TEST(tr, TestSpaceGrid);
+
+	// Gas params
+	double Tg = 0.1;
+	double ng = 1e14;
+	double mg = datum::m_p * datum::c_0 * datum::c_0 / datum::eV;
+
+	// Plasma params
+	double Tp = 100;
+	double np = 1e14;
+	double mi = mg;
+	Plasma p(mi, Tp, np);
+
+	// Velocity grid params
+	size_t v_size = 11;
+	double Vmax = 3 * sqrt(2 * Tg / mg);
+	VelocityGrid v(v_size, Vmax);
+
+	DistributionFunction f_H(DistributionType::TestDistribution_1, mg, v, ng, Tg);
+	vector<shared_ptr<PlasmaGasProcess>> pg_procs = {
+			make_shared<He_ionization>("He_ionization.txt", p)
+	};
+	vector<shared_ptr<GasGasProcess>> gg_procs = {
+			make_shared<Hard_spheres_collision>(datum::a_0 * datum::a_0 * 250, v)
+	};
+	Gas g(f_H, pg_procs, gg_procs);
+	auto time_steps = g.TimeEvolution_SmartTimeStep(p, 0.1);
+	double dt = time_steps.first + time_steps.second;
+
 	return 0;
 }

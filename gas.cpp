@@ -45,3 +45,7 @@ pair<double, double> Gas::TimeEvolution_SmartTimeStep(const Plasma& p, const dou
 	df.ChangeDFbyProcess(rhs);
 	return make_pair(transport_time_step, proc_time_step);
 }
+
+void Gas::SaveDistr(const size_t space_idx, const size_t time_idx){
+	df.Save(space_idx, "DF_z_" + to_string(space_idx) + "_t_" + to_string(time_idx));
+}

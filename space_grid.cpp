@@ -28,6 +28,8 @@ size_t SpaceGrid::GetSize() const{
 }
 
 double SpaceGrid::GetGridStep() const{
+	if(x_grid.size() == 1)
+		return 0;
 	return x_grid[1] - x_grid[0];
 }
 

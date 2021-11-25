@@ -16,6 +16,8 @@ public:
 
 	pair<double, double> TimeEvolution_SmartTimeStep(const Plasma& p, const double time_accuracy);
 
+	void SaveDistr(const size_t space_idx, const size_t time_idx);
+
 private:
 	DistributionFunction df;
 	vector<shared_ptr<PlasmaGasProcess>> pg_processes;

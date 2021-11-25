@@ -10,6 +10,8 @@ class Plasma{
 public:
 	Plasma(const double mass, const vector<double>& T, const vector<double>& n);
 
+	Plasma(const double mass, const double T, const double n);
+
 	cube MakeMaxwellDistr(const size_t sg_idx, const vec& vel_1D) const;
 
 	size_t GetSpaceSize() const;

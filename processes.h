@@ -48,7 +48,7 @@ class PlasmaGasProcess{
 public:
 	PlasmaGasProcess(const ProcessType proc, const DataType data_type) : pt(proc), dt(data_type){}
 
-	virtual ~PlasmaGasProcess();
+	virtual ~PlasmaGasProcess(){}
 
 	virtual vector<cube> ComputePGRightHandSide(const Plasma& p, const DistributionFunction& df) const = 0;
 
@@ -61,7 +61,7 @@ class GasGasProcess{
 public:
 	GasGasProcess(const ProcessType proc, const DataType data_type) : pt(proc), dt(data_type){}
 
-	virtual ~GasGasProcess();
+	virtual ~GasGasProcess(){}
 
 	virtual vector<cube> ComputeGGRightHandSide(const DistributionFunction& df) const = 0;
 
@@ -72,7 +72,8 @@ private:
 
 class Charge_exchange : public PlasmaGasProcess{
 public:
-	Charge_exchange(const string& path) : PlasmaGasProcess(ProcessType::Charge_exchange, DataType::Rate_coefficient) {
+	Charge_exchange(const string& path, const Plasma& p, const DistributionFunction& df) :
+		PlasmaGasProcess(ProcessType::Charge_exchange, DataType::Rate_coefficient) {
 		fstream file(path, ios_base::in);
 		if(file.is_open()){
 			string line;
@@ -106,10 +107,8 @@ public:
 				}
 				fitting_params = join_horiz(fitting_params, vec(param));
 			}
-		}
-	}
-
-	void SetRunoffParam(const Plasma& p, const DistributionFunction& df){
+		}else
+			throw logic_error("No file : " + path);
 		size_t v_size = df.GetVelGrid().GetSize();
 		vec vel_1D(df.GetVelGrid().Get1DGrid());
 
@@ -141,6 +140,17 @@ public:
 					- runoff_params[i] % df.GetDistrSlice(i);
 		}
 		return rhs;
+	}
+
+	void SaveCXRateCoeff(const double T, const size_t Ne) const{
+		vec rate_coeff(Ne, fill::zeros);
+		vec vecE(Ne, fill::zeros);
+		for(size_t i = 0; i < Ne; ++i){
+			vecE(i) = E_lims.first + (E_lims.second - E_lims.first)/(Ne-1)*i;
+			rate_coeff(i) = ComputeRateCoeff(T, vecE(i));
+		}
+		rate_coeff.save("CXRateCoeff.bin", raw_binary);
+		vecE.save("E_range.bin", raw_binary);
 	}
 
 private:
@@ -185,7 +195,7 @@ private:
 
 class He_ionization : public PlasmaGasProcess{
 public:
-	He_ionization(const string& path) : PlasmaGasProcess(ProcessType::He_Ionization, DataType::Rate_coefficient){
+	He_ionization(const string& path, const Plasma& p) : PlasmaGasProcess(ProcessType::He_Ionization, DataType::Rate_coefficient){
 		fstream file(path, ios_base::in);
 		if(file.is_open()){
 			string line;
@@ -193,10 +203,8 @@ public:
 				istringstream buffer(line);
 				fitting_params.push_back(*istream_iterator<double>(buffer));
 			}
-		}
-	}
-
-	void SetRunoffParams(const Plasma& p){
+		}else
+			throw logic_error("No file :" + path);
 		runoff_params = vector<double>(p.GetSpaceSize(), 0.0);
 		for(size_t i = 0; i < p.GetSpaceSize(); ++i){
 			runoff_params[i] = ComputeRateCoeff(p.GetTemperature(i)) * p.GetDensity(i);
@@ -210,6 +218,19 @@ public:
 			rhs[i] = - runoff_params[i] * df.GetDistrSlice(i);
 		}
 		return rhs;
+	}
+
+	void SaveIonizRateCoeff(const size_t N) const{
+		double T_min = fitting_params[0];
+		double T_max = fitting_params[1];
+		vec vecT(N, fill::zeros);
+		vec rate_coeff(N, fill::zeros);
+		for(size_t i = 0; i < N; ++i){
+			vecT(i) = T_min + (T_max - T_min)/(N-1)*i;
+			rate_coeff(i) = ComputeRateCoeff(vecT(i));
+		}
+		vecT.save("T_range.bin", raw_binary);
+		rate_coeff.save("IonizRateCoeff.bin", raw_binary);
 	}
 
 private:
@@ -233,7 +254,7 @@ private:
 
 class He_elastic : public PlasmaGasProcess{
 public:
-	He_elastic(const string& path, const double target_mass_) : PlasmaGasProcess(ProcessType::He_elastic, DataType::Diffusion_coefficient),
+	He_elastic(const string& path, const double target_mass_, const Plasma& p) : PlasmaGasProcess(ProcessType::He_elastic, DataType::Diffusion_coefficient),
 	target_mass(target_mass_) {
 		fstream file(path, ios_base::in);
 		if(file.is_open()){
@@ -247,9 +268,6 @@ public:
 			}
 		}else
 			throw logic_error(path + " : file not found");
-	}
-
-	void SetDiffusCoeff(const Plasma& p){
 		diffus_coeff = vector<double>(p.GetSpaceSize(), 0.0);
 		for(size_t i = 0; i < p.GetSpaceSize(); ++i){
 			double T = p.GetTemperature(i);
@@ -317,7 +335,8 @@ private:
 
 class HHplus_elastic : public PlasmaGasProcess{
 public:
-	HHplus_elastic(const string& path) : PlasmaGasProcess(ProcessType::Hp_elastic, DataType::Differential_cross_section){
+	HHplus_elastic(const string& path, const VelocityGrid& v_g, const VelocityGrid& v_p, const Plasma& p) :
+		PlasmaGasProcess(ProcessType::Hp_elastic, DataType::Differential_cross_section){
 		fstream file(path, ios_base::in);
 		if(file.is_open()){
 			string line;
@@ -336,9 +355,6 @@ public:
 			}
 		}else
 			throw logic_error(path + " : file not found");
-	}
-
-	void SetCollisions_mat(const VelocityGrid& v_g, const VelocityGrid& v_p, const Plasma& p){
 		size_t v_size = v_p.GetSize();
 		size_t N_angle = 500;
 		double phase_volume = pow(v_p.GetGridStep(),3);
@@ -405,6 +421,17 @@ public:
 		return result;
 	}
 
+	void SaveDiffCross(const double E, const size_t N_angle) const{
+		vec angles(N_angle, fill::zeros);
+		vec diff_cross(N_angle, fill::zeros);
+		for(size_t i = 0; i < N_angle; ++i){
+			angles(i) = i * datum::pi / (N_angle - 1);
+			diff_cross(i) = ComputeDiffCross(E, angles(i));
+ 		}
+		angles.save("angles_range.bin", raw_binary);
+		diff_cross.save("HHplus_diff_cross.bin", raw_binary);
+	}
+
 private:
 	double ComputeDiffCross(const double E, const double angle) const{
 		auto upper_bound_energy = upper_bound(energies.begin(), energies.end(), E);
@@ -450,10 +477,8 @@ private:
 
 class Hard_spheres_collision : public GasGasProcess{
 public:
-	Hard_spheres_collision(const double dcs) : GasGasProcess(ProcessType::Hard_spheres_collision,
-			DataType::Hard_spheres_cross_section), diff_cross_section(dcs) {}
-
-	void SetCollisions_mat(const VelocityGrid& v){
+	Hard_spheres_collision(const double dcs, const VelocityGrid& v) : GasGasProcess(ProcessType::Hard_spheres_collision,
+			DataType::Hard_spheres_cross_section), diff_cross_section(dcs) {
 		size_t v_size = v.GetSize();
 		size_t N_angle = 500;
 		double phase_volume = pow(v.GetGridStep(),3);
@@ -506,7 +531,7 @@ private:
 
 class HH_elastic : public GasGasProcess{
 public:
-	HH_elastic(const string& path) : GasGasProcess(ProcessType::HH_elastic, DataType::Differential_cross_section){
+	HH_elastic(const string& path, const VelocityGrid& v) : GasGasProcess(ProcessType::HH_elastic, DataType::Differential_cross_section){
 		fstream file(path, ios_base::in);
 		if(file.is_open()){
 			string line;
@@ -525,9 +550,6 @@ public:
 			}
 		}else
 			throw logic_error(path + " : file not found");
-	}
-
-	void SetCollisions_mat(const VelocityGrid& v){
 		size_t v_size = v.GetSize();
 		size_t N_angle = 500;
 		double phase_volume = pow(v.GetGridStep(),3);
@@ -572,6 +594,17 @@ public:
 			result[i] = ComputeCollisionsIntegral(df.GetDistrSlice(i), collisions_mat, df.GetVelGrid(), true);
 		}
 		return result;
+	}
+
+	void SaveHHDiffCross(const double E, const size_t N_angle){
+		vec angles(N_angle, fill::zeros);
+		vec diff_cross(N_angle, fill::zeros);
+		for(size_t i = 0; i < N_angle; ++i){
+			angles(i) = i * datum::pi / (N_angle - 1);
+			diff_cross(i) = ComputeDiffCross(E, angles(i));
+ 		}
+		angles.save("angles_range.bin", raw_binary);
+		diff_cross.save("HHplus_diff_cross.bin", raw_binary);
 	}
 
 private:

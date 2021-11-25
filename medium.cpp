@@ -2,6 +2,8 @@
 
 Plasma::Plasma(const double mass, const vector<double>& T, const vector<double>& n) : Tp(T), np(n), ion_mass(mass) {}
 
+Plasma::Plasma(const double mass, const double T, const double n) : Tp(vector<double>{T}), np(vector<double>{n}), ion_mass(mass){}
+
 cube Plasma::MakeMaxwellDistr(const size_t sg_idx, const vec& vel_1D) const{
 	size_t v_size = vel_1D.size();
 	cube distr(v_size,v_size,v_size,fill::zeros);

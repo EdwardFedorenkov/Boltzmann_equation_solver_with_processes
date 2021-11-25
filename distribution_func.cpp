@@ -199,8 +199,10 @@ void DistributionFunction::Save(const size_t space_position, const string& file_
 }
 
 void DistributionFunction::ChangeDFbyTransport(){
-	for(size_t i = 0; i < space_grid.GetSize(); ++i){
-		distribution_function(i) += ComputeFlax(i) * ComputeTransportTimeStep() / space_grid.GetGridStep();
+	if(space_grid.GetSize() != 1){
+		for(size_t i = 0; i < space_grid.GetSize(); ++i){
+			distribution_function(i) += ComputeFlax(i) * ComputeTransportTimeStep() / space_grid.GetGridStep();
+		}
 	}
 }
 
