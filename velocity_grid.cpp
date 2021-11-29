@@ -1,5 +1,6 @@
 #include "velocity_grid.h"
 #include <iostream>
+#include <armadillo>
 
 vector<double> Make_1D_v_grid(size_t v_size, double Vmax){
 	/* This function build 1D grid size of "v_size"
@@ -22,6 +23,9 @@ VelocityGrid::VelocityGrid(size_t v_size, double Vmax_) :
 				v_grid(Make_1D_v_grid(v_size, Vmax_)){}
 
 VelocityGrid::VelocityGrid(const vector<double>& v) : v_grid(v) {}
+
+VelocityGrid::VelocityGrid(const size_t v_size, const double T, const double mass) :
+		v_grid(Make_1D_v_grid(v_size, 3 * sqrt(2 * T / mass) * arma::datum::c_0 * 100)) {}
 
 size_t VelocityGrid::GetSize() const{
 	return v_grid.size();

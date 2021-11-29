@@ -43,9 +43,20 @@ void TestSpaceGrid(){
 	ASSERT_EQUAL(x.GetWalls().walls_T.second, 300 * datum::k_evk);
 }
 
-void SaveProcessData(const Plasma& p, const DistributionFunction& df){
-	Charge_exchange cx("ChargeExchange.txt", p, df);
-	He_ionization ioniz("ElectronIonization.txt", p);
+void SaveProcessData(const Plasma& p, const DistributionFunction& df, const size_t N_points, const double E){
+	double Tg = *df.ComputeTemperatureStatic().begin();
+	double Tp = p.GetTemperature(0);
+	size_t v_size = 11;
+	VelocityGrid vg(v_size, Tg, datum::m_p * datum::c_0 * datum::c_0 * 1e4);
+	VelocityGrid vp(v_size, Tp, datum::m_p * datum::c_0 * datum::c_0 * 1e4);
+	//Charge_exchange cx("ChargeExchange.txt", p, df);
+	//He_ionization ioniz("ElectronIonization.txt", p);
+	HHplus_elastic hp_elastic("HpElastic.txt", vg, vp, p);
+	//HH_elastic hh_elastic("HHElastic.txt", vg);
+	//cx.SaveCXRateCoeff(E, N_points);
+	//ioniz.SaveIonizRateCoeff(N_points);
+	//hp_elastic.SaveDiffCross(E, N_points);
+	//hh_elastic.SaveHHDiffCross(E, N_points);
 }
 
 int main() {
@@ -55,7 +66,7 @@ int main() {
 	RUN_TEST(tr, TestSpaceGrid);
 
 	// Gas params
-	double Tg = 0.1;
+	double Tg = 0.3;
 	double ng = 1e14;
 	double mg = datum::m_p * datum::c_0 * datum::c_0 / datum::eV;
 
@@ -67,19 +78,10 @@ int main() {
 
 	// Velocity grid params
 	size_t v_size = 11;
-	double Vmax = 3 * sqrt(2 * Tg / mg);
-	VelocityGrid v(v_size, Vmax);
+	VelocityGrid v(v_size, Tg, mg);
 
 	DistributionFunction f_H(DistributionType::TestDistribution_1, mg, v, ng, Tg);
-	vector<shared_ptr<PlasmaGasProcess>> pg_procs = {
-			make_shared<He_ionization>("He_ionization.txt", p)
-	};
-	vector<shared_ptr<GasGasProcess>> gg_procs = {
-			make_shared<Hard_spheres_collision>(datum::a_0 * datum::a_0 * 250, v)
-	};
-	Gas g(f_H, pg_procs, gg_procs);
-	auto time_steps = g.TimeEvolution_SmartTimeStep(p, 0.1);
-	double dt = time_steps.first + time_steps.second;
+	SaveProcessData(p, f_H, 100, 50);
 
 	return 0;
 }

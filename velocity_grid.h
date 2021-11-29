@@ -11,6 +11,8 @@ public:
 
 	VelocityGrid(const vector<double>& v);
 
+	VelocityGrid(const size_t v_size, const double T, const double mass);
+
 	size_t GetSize() const;
 
 	double GetGridStep() const;

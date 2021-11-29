@@ -3,8 +3,8 @@
 vec BuildLogVec(const double x, const size_t s){
 	vec result(s, fill::ones);
 	double logx = log(x);
-	for(auto& item : result){
-		item *= logx;
+	for(size_t i = 1; i < s; ++i){
+		result[i] = result[i-1] * logx;
 	}
 	return result;
 }
