@@ -99,11 +99,11 @@ public:
 			while(getline(file, line)){
 				istringstream buffer(line);
 				vector<double> param(9, 0.0);
-				param.push_back(*istream_iterator<double>(buffer));
-				for(size_t i = 0; i < 8; ++i){
+				param[0] = *istream_iterator<double>(buffer);
+				for(size_t i = 1; i < 9; ++i){
 					getline(file, line);
 					istringstream tmp_buffer(line);
-					param.push_back(*istream_iterator<double>(tmp_buffer));
+					param[i] = *istream_iterator<double>(tmp_buffer);
 				}
 				fitting_params = join_horiz(fitting_params, vec(param));
 			}
@@ -113,7 +113,7 @@ public:
 		vec vel_1D(df.GetVelGrid().Get1DGrid());
 
 		runoff_params = vector<cube>(df.GetSpaceGrid().GetSize(), cube(v_size,v_size,v_size, fill::zeros));
-		double gas_mass = df.GetParticleMass();
+		double gas_mass = df.GetParticleMass() * datum::eV * 1e3 / (datum::c_0 * datum::c_0);
 		for(size_t i = 0; i < df.GetSpaceGrid().GetSize(); ++i){
 			for(size_t k = 0; k < v_size; ++k){
 				double sqr_vz = Sqr(vel_1D(k));
@@ -142,24 +142,27 @@ public:
 		return rhs;
 	}
 
-	void SaveCXRateCoeff(const double T, const size_t Ne) const{
+	void SaveCXRateCoeff(const double E, const size_t Ne) const{
 		vec rate_coeff(Ne, fill::zeros);
-		vec vecE(Ne, fill::zeros);
+		vec vecT(Ne, fill::zeros);
 		for(size_t i = 0; i < Ne; ++i){
-			vecE(i) = E_lims.first + (E_lims.second - E_lims.first)/(Ne-1)*i;
-			rate_coeff(i) = ComputeRateCoeff(T, vecE(i));
+			vecT(i) = T_lims.first + (T_lims.second - T_lims.first)/(Ne-1)*i;
+			rate_coeff(i) = ComputeRateCoeff(vecT(i), E);
 		}
 		rate_coeff.save("CXRateCoeff.bin", raw_binary);
-		vecE.save("E_range.bin", raw_binary);
+		vecT.save("T_range.bin", raw_binary);
 	}
 
 private:
 	double ComputeRateCoeff(const double T, const double E) const{
 		double result = 0.0;
 		if((T_lims.second - T)*(T - T_lims.first) >= 0 and (E_lims.second - E)*(E - E_lims.first) >= 0){
-			result = exp(as_scalar(trans(BuildLogVec(T, fitting_params.n_cols))*fitting_params*BuildLogVec(E, fitting_params.n_rows)));
+			result = exp(as_scalar(trans(BuildLogVec(T, fitting_params.n_rows))*fitting_params*BuildLogVec(E, fitting_params.n_cols)));
+		}else if(E < E_lims.first){
+			result = exp(as_scalar(trans(BuildLogVec(T, fitting_params.n_rows))*fitting_params*
+					BuildLogVec(E_lims.first, fitting_params.n_cols)));
 		}else
-			throw out_of_range("T or E is out of limits");
+			throw out_of_range("T or E is out of limits : T = " + to_string(T) + " E = " + to_string(E));
 		return result;
 	}
 
@@ -237,15 +240,16 @@ private:
 	double ComputeRateCoeff(const double T) const{
 		double T_min = fitting_params[0];
 		double T_max = fitting_params[1];
-		vector<double> logT_vec(fitting_params.size() - 2, 0.0);
+		vec logT_vec;
 		if( (T_max - T)*(T - T_min) >= 0 ){
-			logT_vec[0] = log(T);
-			for(size_t i = 1; i < logT_vec.size(); ++i){
-				logT_vec[i] = logT_vec[i-1] * logT_vec[0];
-			}
+			logT_vec = BuildLogVec(T, fitting_params.size() - 2);
 		}else
 			throw out_of_range("Electron temperature in He_ionization is out of range");
-		return exp(inner_product(fitting_params.begin() + 2, fitting_params.end(), logT_vec.begin(), 0.0));
+		vec params(fitting_params.size() - 2, fill::zeros);
+		for(size_t i = 0; i < params.n_elem; ++i){
+			params(i) = fitting_params[i+2];
+		}
+		return exp(dot(params, logT_vec));
 	}
 
 	vector<double> fitting_params;
