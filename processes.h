@@ -355,7 +355,7 @@ public:
 							istream_iterator<double>());
 					current_params.push_back(param);
 				}
-				energy_idx_to_coeff[energies.size()-1] = current_params;
+				energy_idx_to_coeff.push_back(current_params);
 			}
 		}else
 			throw logic_error(path + " : file not found");
@@ -454,7 +454,9 @@ private:
 	}
 
 	double FittingFunction(const size_t E_index, const double angle) const{
-		vector<vector<double>> coeffs = energy_idx_to_coeff.at(E_index);
+		angle = (angle < 1e-5) ? 1e-5 : angle;
+		angle = (angle > datum::pi - 1e-4) ? datum::pi - 1e-4 : angle;
+		vector<vector<double>> coeffs = energy_idx_to_coeff[E_index];
 		double cos_angle = cos(angle);
 		double sin_angle = sin(angle);
 		double ln_angle = log(angle);
@@ -474,7 +476,7 @@ private:
 				* datum::a_0 * datum::a_0 * 1e4;
 	}
 
-	map<size_t, vector<vector<double>>> energy_idx_to_coeff;
+	vector<vector<vector<double>>> energy_idx_to_coeff;
 	vector<double> energies;
 	vector<mat> collisions_mat;
 };
@@ -550,7 +552,7 @@ public:
 							istream_iterator<double>());
 					current_params.push_back(param);
 				}
-				energy_idx_to_coeff[energies.size()-1] = current_params;
+				energy_idx_to_coeff.push_back(current_params);
 			}
 		}else
 			throw logic_error(path + " : file not found");
@@ -608,7 +610,7 @@ public:
 			diff_cross(i) = ComputeDiffCross(E, angles(i));
  		}
 		angles.save("angles_range.bin", raw_binary);
-		diff_cross.save("HHplus_diff_cross.bin", raw_binary);
+		diff_cross.save("HH_diff_cross.bin", raw_binary);
 	}
 
 private:
@@ -628,8 +630,10 @@ private:
 				* (upper_cross_section - lower_cross_section);
 	}
 
-	double FittingFunction(const size_t E_index, const double angle) const{
-		vector<vector<double>> coeffs = energy_idx_to_coeff.at(E_index);
+	double FittingFunction(const size_t E_index, double angle) const{
+		angle = (angle < 1e-5) ? 1e-5 : angle;
+		angle = (angle > datum::pi - 1e-4) ? datum::pi - 1e-4 : angle;
+		vector<vector<double>> coeffs = energy_idx_to_coeff[E_index];
 		double cos_angle = cos(angle);
 		double sin_angle = sin(angle);
 		double ln_angle = log(angle);
@@ -649,7 +653,7 @@ private:
 				* datum::a_0 * datum::a_0 * 1e4;
 	}
 
-	map<size_t, vector<vector<double>>> energy_idx_to_coeff;
+	vector<vector<vector<double>>> energy_idx_to_coeff;
 	vector<double> energies;
 	mat collisions_mat;
 };

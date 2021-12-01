@@ -46,16 +46,17 @@ void TestSpaceGrid(){
 void SaveProcessData(const Plasma& p, const DistributionFunction& df, const size_t N_points, const double E){
 	double Tg = *df.ComputeTemperatureStatic().begin();
 	double Tp = p.GetTemperature(0);
-	size_t v_size = 11;
-	VelocityGrid vg(v_size, Tg, datum::m_p * datum::c_0 * datum::c_0 * 1e4);
-	VelocityGrid vp(v_size, Tp, datum::m_p * datum::c_0 * datum::c_0 * 1e4);
+	size_t vg_size = 11;
+	size_t vp_size = 111;
+	VelocityGrid vg(vg_size, Tg, datum::m_p * datum::c_0 * datum::c_0 * 1e4);
+	VelocityGrid vp(vp_size, Tp, datum::m_p * datum::c_0 * datum::c_0 * 1e4);
 	//Charge_exchange cx("ChargeExchange.txt", p, df);
 	//He_ionization ioniz("ElectronIonization.txt", p);
 	HHplus_elastic hp_elastic("HpElastic.txt", vg, vp, p);
 	//HH_elastic hh_elastic("HHElastic.txt", vg);
 	//cx.SaveCXRateCoeff(E, N_points);
 	//ioniz.SaveIonizRateCoeff(N_points);
-	//hp_elastic.SaveDiffCross(E, N_points);
+	hp_elastic.SaveDiffCross(E, N_points);
 	//hh_elastic.SaveHHDiffCross(E, N_points);
 }
 
