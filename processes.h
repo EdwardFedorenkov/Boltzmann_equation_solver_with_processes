@@ -359,17 +359,18 @@ public:
 			}
 		}else
 			throw logic_error(path + " : file not found");
-		size_t v_size = v_p.GetSize();
+		size_t vp_size = v_p.GetSize();
+		size_t vg_size = v_g.GetSize();
 		size_t N_angle = 500;
 		double phase_volume = pow(v_p.GetGridStep(),3);
 		vec pl_vel_1D(v_p.Get1DGrid());
 		vec gas_vel_1D(v_g.Get1DGrid());
-		mat sourse(v_size * v_size * v_size, v_size * v_size * v_size, fill::zeros);
+		mat sourse(vp_size * vp_size * vp_size, vg_size * vg_size * vg_size, fill::zeros);
 		mat runoff(sourse);
 		double factor = phase_volume * 4 * datum::pi / N_angle;
-		for(size_t k = 0; k < v_size; ++k){
-			for(size_t l = 0; l < v_size; ++l){
-				for(size_t m = 0; m < v_size; ++m){
+		for(size_t k = 0; k < vp_size; ++k){
+			for(size_t l = 0; l < vp_size; ++l){
+				for(size_t m = 0; m < vp_size; ++m){
 					vec3 second_particle_velocity = {pl_vel_1D(m), pl_vel_1D(l), pl_vel_1D(k)};
 					double reletive_velocity = sqrt(Sqr(second_particle_velocity(0))
 							+ Sqr(second_particle_velocity(1))
@@ -381,25 +382,24 @@ public:
 					}
 					for(auto& point : sphere_points){
 						pair<vec3, vec3> post_collision_velocities = PostCollisionVelocities(second_particle_velocity, point, reletive_velocity, 0.0);
-						auto Node_1 = FindNearestNode(gas_vel_1D, post_collision_velocities.first);
-						auto Node_2 = FindNearestNode(pl_vel_1D, post_collision_velocities.second);
+						auto Node_1 = FindNearestNode(pl_vel_1D, post_collision_velocities.first);
+						auto Node_2 = FindNearestNode(gas_vel_1D, post_collision_velocities.second);
 						double cross_section = ComputeDiffCross(CM_energy, acos(norm_dot(point, -second_particle_velocity)));
 						double elem = factor * reletive_velocity * cross_section;
 						if (Node_1.second && Node_2.second){
-							sourse(v_size*v_size*Node_1.first[2] + v_size*Node_1.first[1] + Node_1.first[0],
-									v_size*v_size*Node_2.first[2] + v_size*Node_2.first[1] + Node_2.first[0]) += elem;
+							sourse(vp_size*vp_size*Node_1.first[2] + vp_size*Node_1.first[1] + Node_1.first[0],
+									vg_size*vg_size*Node_2.first[2] + vg_size*Node_2.first[1] + Node_2.first[0]) += elem;
 						}
-						runoff(v_size*v_size*k + v_size*l + m, (v_size * v_size * v_size - 1) / 2) += elem;
+						runoff(vp_size*vp_size*k + vp_size*l + m, (vg_size * vg_size * vg_size - 1) / 2) += elem;
 					}
 				}
 			}
 		}
 		mat G = move(sourse) - move(runoff);
-		vector<cube> plasma_distr(p.GetSpaceSize(), cube(v_size, v_size, v_size, fill::zeros));
 		for(size_t i = 0; i < p.GetSpaceSize(); ++i){
-			for(size_t k = 0; k < v_size; ++k){
-				for(size_t l = 0; l < v_size; ++l){
-					for(size_t m = 0; m < v_size; ++m){
+			for(size_t k = 0; k < vp_size; ++k){
+				for(size_t l = 0; l < vp_size; ++l){
+					for(size_t m = 0; m < vp_size; ++m){
 						cube df_shift = DFShiftProcedure(p.MakeMaxwellDistr(i, pl_vel_1D), {m, l, k});
 						collisions_mat[i] = join_vert(collisions_mat[i], vectorise(df_shift).t()*G);
 					}
@@ -453,7 +453,7 @@ private:
 				* (upper_cross_section - lower_cross_section);
 	}
 
-	double FittingFunction(const size_t E_index, const double angle) const{
+	double FittingFunction(const size_t E_index, double angle) const{
 		angle = (angle < 1e-5) ? 1e-5 : angle;
 		angle = (angle > datum::pi - 1e-4) ? datum::pi - 1e-4 : angle;
 		vector<vector<double>> coeffs = energy_idx_to_coeff[E_index];

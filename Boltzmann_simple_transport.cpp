@@ -27,6 +27,10 @@ void TestVelocityGrid(){
 	DOUBLES_ASSERT_EQUAL_ACCURATE_TO(datum::eps, v2.GetGridStep(), 1.11);
 	ASSERT_EQUAL(v2.GetSize(), 7u);
 	ASSERT_EQUAL(v2.GetMax(), 3.33);
+	VelocityGrid v3(size_t(7), 1.0, 2.0 * datum::c_0 * datum::c_0 * 1e4);
+	CONTAINERS_ASSERT_EQUAL_ACCURATE_TO(datum::eps, vec(v3.Get1DGrid()), vec({-3,-2,-1,0,1,2,3}));
+	VelocityGrid v4(v3.GetGridStep(), 1.0, 2.0 * datum::c_0 * datum::c_0 * 1e4);
+	CONTAINERS_ASSERT_EQUAL_ACCURATE_TO(datum::eps, vec(v3.Get1DGrid()), vec(v4.Get1DGrid()));
 }
 
 void TestSpaceGrid(){
@@ -45,18 +49,16 @@ void TestSpaceGrid(){
 
 void SaveProcessData(const Plasma& p, const DistributionFunction& df, const size_t N_points, const double E){
 	double Tg = *df.ComputeTemperatureStatic().begin();
-	double Tp = p.GetTemperature(0);
 	size_t vg_size = 11;
-	size_t vp_size = 111;
 	VelocityGrid vg(vg_size, Tg, datum::m_p * datum::c_0 * datum::c_0 * 1e4);
-	VelocityGrid vp(vp_size, Tp, datum::m_p * datum::c_0 * datum::c_0 * 1e4);
-	//Charge_exchange cx("ChargeExchange.txt", p, df);
+	VelocityGrid vp(vg_size, Tg, datum::m_p * datum::c_0 * datum::c_0 * 1e4);
+	Charge_exchange cx("ChargeExchange.txt", p, df);
 	//He_ionization ioniz("ElectronIonization.txt", p);
-	HHplus_elastic hp_elastic("HpElastic.txt", vg, vp, p);
+	//HHplus_elastic hp_elastic("HpElastic.txt", vg, vp, p);
 	//HH_elastic hh_elastic("HHElastic.txt", vg);
-	//cx.SaveCXRateCoeff(E, N_points);
+	cx.SaveCXRateCoeff(E, N_points);
 	//ioniz.SaveIonizRateCoeff(N_points);
-	hp_elastic.SaveDiffCross(E, N_points);
+	//hp_elastic.SaveDiffCross(E, N_points);
 	//hh_elastic.SaveHHDiffCross(E, N_points);
 }
 
@@ -67,7 +69,7 @@ int main() {
 	RUN_TEST(tr, TestSpaceGrid);
 
 	// Gas params
-	double Tg = 0.3;
+	double Tg = 1;
 	double ng = 1e14;
 	double mg = datum::m_p * datum::c_0 * datum::c_0 / datum::eV;
 
@@ -81,8 +83,17 @@ int main() {
 	size_t v_size = 11;
 	VelocityGrid v(v_size, Tg, mg);
 
+	// Time Evolution
+	size_t N_steps = 50;
+
 	DistributionFunction f_H(DistributionType::TestDistribution_1, mg, v, ng, Tg);
-	SaveProcessData(p, f_H, 100, 50);
+	Gas H(f_H, vector<shared_ptr<PlasmaGasProcess>>({make_shared<He_ionization>("ElectronIonization.txt", p)}), vector<shared_ptr<GasGasProcess>>{});
+	for(size_t t = 0; t < N_steps; ++t){
+		auto times = H.TimeEvolution_SmartTimeStep(p, 0.1);
+		H.SaveDistr(0, t);
+		cout << times.first << ' ' << times.second << '\n';
+	}
+	//SaveProcessData(p, f_H, 100, 50);
 
 	return 0;
 }
