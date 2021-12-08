@@ -7,7 +7,7 @@ Plasma::Plasma(const double mass, const double T, const double n) : Tp(vector<do
 cube Plasma::MakeMaxwellDistr(const size_t sg_idx, const vec& vel_1D) const{
 	size_t v_size = vel_1D.size();
 	cube distr(v_size,v_size,v_size,fill::zeros);
-	double sqr_termal_vel = 2 * Tp[sg_idx] / ion_mass;
+	double sqr_termal_vel = 2 * Tp[sg_idx] / ion_mass * datum::c_0 * datum::c_0 * 1e4;
 	double factor = np[sg_idx] / pow(sqrt(datum::pi * sqr_termal_vel),3);
 	for(size_t k = 0; k < v_size; ++k){
 		for(size_t l = 0; l < v_size; ++l){

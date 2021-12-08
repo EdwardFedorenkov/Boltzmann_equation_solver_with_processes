@@ -180,7 +180,7 @@ private:
 					double sqr_vy = Sqr(vel_1D(l));
 					for(size_t m = 0; m < v_size; ++m){
 						double sqr_vx = Sqr(vel_1D(m));
-						double energy = gas_mass * (sqr_vz + sqr_vy + sqr_vx) * 0.5;
+						double energy = gas_mass * (sqr_vz + sqr_vy + sqr_vx) / (datum::c_0 * datum::c_0 * 1e4) * 0.25;
 						source_params[i] += df.GetDistrSlice(i)(m,l,k) * ComputeRateCoeff(p.GetTemperature(i), energy);
 					}
 				}

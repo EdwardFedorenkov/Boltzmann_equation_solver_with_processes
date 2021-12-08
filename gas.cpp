@@ -5,11 +5,19 @@ Gas::Gas(const DistributionFunction& distr, const vector<shared_ptr<PlasmaGasPro
 
 double Gas::ComputeTimeStep(const vector<cube>& rhs, const double accuracy) const{
 	size_t x_size = df.GetSpaceGrid().GetSize();
-	vec time_step(df.GetSpaceGrid().GetSize(), fill::zeros);
+	vec time_step(x_size, fill::zeros);
 	for(size_t i = 0; i < x_size; ++i){
+		double mean_df = mean(mean(mat(mean(df.GetDistrSlice(i),2))));
 		cube time_steps = accuracy * df.GetDistrSlice(i) / abs(rhs[i]);
 		time_steps.transform([accuracy](double val)
 				{ return ((val > datum::eps) and isfinite(val)) ? val : 1; });
+		double time_step_condidate = time_steps.min();
+		double delta_f = time_step_condidate * mean(mean(mat(mean(abs(rhs[i]),2))));
+		if(delta_f < 1e-4*mean_df){
+			time_steps = accuracy * df.GetDistrSlice(i) / (abs(rhs[i]) % (rhs[i] < 0));
+			time_steps.transform([accuracy](double val)
+					{ return ((val > datum::eps) and isfinite(val)) ? val : 1; });
+		}
 		time_step(i) = time_steps.min();
 	}
 	return min(time_step);

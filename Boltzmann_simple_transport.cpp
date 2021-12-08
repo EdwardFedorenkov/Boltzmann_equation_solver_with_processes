@@ -62,6 +62,15 @@ void SaveProcessData(const Plasma& p, const DistributionFunction& df, const size
 	//hh_elastic.SaveHHDiffCross(E, N_points);
 }
 
+void CXCheck(const Plasma& p, const DistributionFunction& df){
+	Charge_exchange cx("ChargeExchange.txt", p, df);
+	auto rhs = cx.ComputePGRightHandSide(p, df);
+	//size_t mid_point = (df.GetVelGrid().GetSize() - 1) / 2;
+	cout << 0.1 * df.GetDistrSlice(0) / abs(rhs[0]) << endl;
+	//auto plasma_distr = p.MakeMaxwellDistr(0, df.GetVelGrid().Get1DGrid());
+	//cout << plasma_distr.slice(mid_point) << endl;
+}
+
 int main() {
 	// Testing procedure
 	TestRunner tr;
@@ -84,16 +93,17 @@ int main() {
 	VelocityGrid v(v_size, Tg, mg);
 
 	// Time Evolution
-	size_t N_steps = 50;
+	size_t N_steps = 20;
 
 	DistributionFunction f_H(DistributionType::TestDistribution_1, mg, v, ng, Tg);
-	Gas H(f_H, vector<shared_ptr<PlasmaGasProcess>>({make_shared<He_ionization>("ElectronIonization.txt", p)}), vector<shared_ptr<GasGasProcess>>{});
+	Gas H(f_H, vector<shared_ptr<PlasmaGasProcess>>({make_shared<Charge_exchange>("ChargeExchange.txt", p, f_H)}), vector<shared_ptr<GasGasProcess>>{});
 	for(size_t t = 0; t < N_steps; ++t){
 		auto times = H.TimeEvolution_SmartTimeStep(p, 0.1);
 		H.SaveDistr(0, t);
 		cout << times.first << ' ' << times.second << '\n';
 	}
 	//SaveProcessData(p, f_H, 100, 50);
+	//CXCheck(p, f_H);
 
 	return 0;
 }
