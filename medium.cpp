@@ -19,6 +19,10 @@ cube Plasma::MakeMaxwellDistr(const size_t sg_idx, const vec& vel_1D) const{
 	return distr;
 }
 
+double Plasma::ComputeDencity(const size_t sg_idx, const vec& vel_1D) const{
+	return accu(MakeMaxwellDistr(sg_idx, vel_1D)) * pow(abs(vel_1D(1) - vel_1D(0)), 3);
+}
+
 double Plasma::GetTemperature(const size_t idx) const{
 	return Tp[idx];
 }
@@ -29,4 +33,8 @@ double Plasma::GetDensity(const size_t idx) const{
 
 size_t Plasma::GetSpaceSize() const{
 	return Tp.size();
+}
+
+double Plasma::GetIonMass() const{
+	return ion_mass;
 }

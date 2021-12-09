@@ -126,7 +126,7 @@ public:
 					}
 				}
 			}
-			runoff_params[i] *= p.GetDensity(i);
+			runoff_params[i] *= p.ComputeDencity(i, vel_1D);
 		}
 	}
 
@@ -311,6 +311,10 @@ public:
 			rhs[i] *= diffus_coeff[i] / target_mass;
 		}
 		return rhs;
+	}
+
+	double GetDiffusCoeff(const size_t sg_idx){
+		return diffus_coeff[sg_idx];
 	}
 
 private:

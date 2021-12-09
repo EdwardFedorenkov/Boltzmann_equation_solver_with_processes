@@ -14,11 +14,15 @@ public:
 
 	cube MakeMaxwellDistr(const size_t sg_idx, const vec& vel_1D) const;
 
+	double ComputeDencity(const size_t sg_idx, const vec& vel_1D) const;
+
 	size_t GetSpaceSize() const;
 
 	double GetTemperature(const size_t idx) const;
 
 	double GetDensity(const size_t idx) const;
+
+	double GetIonMass() const;
 
 private:
 	vector<double> Tp;
