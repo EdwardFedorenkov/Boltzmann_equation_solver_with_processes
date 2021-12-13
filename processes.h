@@ -18,6 +18,7 @@ enum class ProcessType{
 	HH_elastic,
 	He_elastic,
 	Hp_elastic,
+	HFastIons_elastic,
 	HH_Excitation,
 	He_Excitation,
 	Hp_Excitation,
@@ -43,6 +44,49 @@ enum class ParamsType{
 };
 
 vec BuildLogVec(const double x, const size_t s);
+
+template<typename func>
+double LinearDataApprox(const double E, const double angle, const vector<double>& energies, func& f){
+	auto upper_bound_energy = upper_bound(energies.begin(), energies.end(), E);
+	if(upper_bound_energy == energies.end()){
+		return f(energies.size()-1, angle);
+	}
+	size_t upper_index = upper_bound_energy - energies.begin();
+	cout << upper_index << endl;
+	if(upper_index == 0){
+		return f(0, angle);
+	}
+	double upper_cross_section = f(upper_index, angle);
+	double lower_cross_section = f(upper_index - 1, angle);
+	cout << upper_cross_section << ' ' << lower_cross_section << endl;
+	return lower_cross_section
+			+ (E - energies[upper_index-1]) / (energies[upper_index] - energies[upper_index-1])
+			* (upper_cross_section - lower_cross_section);
+}
+
+pair<vector<double>, vector<vector<vector<double>>>> ReadElasticCrossSec(const string& path){
+	fstream file(path, ios_base::in);
+	vector<vector<vector<double>>> result;
+	vector<double> energies;
+	if(file.is_open()){
+		string line;
+		while(getline(file, line)){
+			istringstream buffer(line);
+			energies.push_back(*istream_iterator<double>(buffer));
+			vector<vector<double>> current_params;
+			for(size_t i = 0; i < 3; ++i){
+				getline(file, line);
+				istringstream tmp_buffer(line);
+				vector<double> param((istream_iterator<double>(tmp_buffer)),
+						istream_iterator<double>());
+				current_params.push_back(param);
+			}
+			result.push_back(current_params);
+		}
+	}else
+		throw logic_error(path + " : file not found");
+	return make_pair(energies, result);
+}
 
 class PlasmaGasProcess{
 public:
@@ -268,16 +312,16 @@ public:
 				vector<double> param((istream_iterator<double>(buffer)),
 						istream_iterator<double>());
 				energies.push_back(param[0]);
-				mt_cross_sections.push_back(param[1]);
+				mt_cross_sections.push_back(param[1] / (datum::a_0 * datum::a_0 * 1e4));
 			}
 		}else
 			throw logic_error(path + " : file not found");
 		diffus_coeff = vector<double>(p.GetSpaceSize(), 0.0);
 		for(size_t i = 0; i < p.GetSpaceSize(); ++i){
 			double T = p.GetTemperature(i);
-			diffus_coeff[i] = 8.0 / (3 * sqrt(2 * datum::pi)) * datum::c_0 * 100 * p.GetDensity(i) * Sqr(T)
-					* T / target_mass / sqrt(T / (datum::m_e * datum::c_0 * datum::c_0 / datum::eV) )
-					* ComputeIntOverEnergy(T);
+			diffus_coeff[i] = 8.0 / (3 * sqrt(2 * datum::pi)) * datum::c_0 * 100 * p.GetDensity(i)
+					* sqrt(datum::m_e * datum::c_0 * datum::c_0 / datum::eV) / target_mass * pow(sqrt(T), 3)
+					* (datum::a_0 * datum::a_0 * 1e4) * ComputeIntOverEnergy(T);
 		}
 	}
 
@@ -300,15 +344,15 @@ public:
 						double f_y_minus = (l == 0) ? 0 : df.GetDistrSlice(i)(m,l-1,k);
 						double f_z_plus = (k == v_size - 1) ? 0 : df.GetDistrSlice(i)(m,l,k+1);
 						double f_z_minus = (k == 0) ? 0 : df.GetDistrSlice(i)(m,l,k-1);
-						rhs[i](m,l,k) = v_x / (sqr_termal_vel * 2 * vel_step) * (f_x_plus - f_x_minus)
-								+ v_y / (sqr_termal_vel * 2 * vel_step) * (f_y_plus - f_y_minus)
-								+ v_z / (sqr_termal_vel * 2 * vel_step) * (f_z_plus - f_z_minus)
-								+ Sqr(datum::c_0 * 100 / vel_step) * (f_x_plus + f_y_plus + f_z_plus + f_x_minus + f_y_minus + f_z_minus);
+						rhs[i](m,l,k) = v_x / (2 * vel_step) * (f_x_plus - f_x_minus)
+								+ v_y / (2 * vel_step) * (f_y_plus - f_y_minus)
+								+ v_z / (2 * vel_step) * (f_z_plus - f_z_minus)
+								+ sqr_termal_vel * Sqr(datum::c_0 * 100 / vel_step) * (f_x_plus + f_y_plus + f_z_plus + f_x_minus + f_y_minus + f_z_minus);
 					}
 				}
 			}
-			rhs[i] += (3 / sqr_termal_vel - 2 * Sqr( datum::c_0 * 100 / vel_step)) * df.GetDistrSlice(i);
-			rhs[i] *= diffus_coeff[i] / target_mass;
+			rhs[i] += (3 - 6 * sqr_termal_vel * Sqr( datum::c_0 * 100 / vel_step)) * df.GetDistrSlice(i);
+			rhs[i] *= diffus_coeff[i] / p.GetTemperature(i);
 		}
 		return rhs;
 	}
@@ -323,8 +367,7 @@ private:
 		for(size_t i = 0; i < energies.size() - 1; ++i){
 			double energy_step = energies[i+1] - energies[i];
 			double first_param = mt_cross_sections[i]*(1 + energies[i] / energy_step) - energies[i] / energy_step * mt_cross_sections[i+1];
-			first_param /= T;
-			double second_param = (mt_cross_sections[i+1] - mt_cross_sections[i]) / energy_step;
+			double second_param = T * (mt_cross_sections[i+1] - mt_cross_sections[i]) / energy_step;
 			result += IntegralValue(energies[i+1] / T, first_param, second_param)
 					- IntegralValue(energies[i] / T, first_param, second_param);
 		}
@@ -341,28 +384,62 @@ private:
 	vector<double> diffus_coeff;
 };
 
+class HFastIons_elastic : public PlasmaGasProcess{
+public:
+	HFastIons_elastic(const string& path, const Plasma& p, const double max_angle_) :
+		PlasmaGasProcess(ProcessType::HFastIons_elastic, DataType::Diffusion_coefficient), max_angle(max_angle_){
+		auto data = ReadElasticCrossSec(path);
+		energies = move(data.first);
+		energy_idx_to_coeff = move(data.second);
+
+	}
+
+private:
+	double ComputeIntOverAngles(const double E) const{
+		double result = 0.0;
+		size_t N_angles = 100;
+		vec angles = linspace(0, max_angle, N_angles);
+		double angle_step = angles(1) - angles(0);
+		for(size_t i = 0; i < N_angles-1; ++i){
+			result += LinearDataApprox(E, angles(i), energies, FittingFunction)
+					+ LinearDataApprox(E, angles(i+1), energies, FittingFunction);
+		}
+		result *= angle_step * 0.5;
+		return result;
+	}
+
+	double FittingFunction(const size_t E_index, double angle) const{
+		vector<vector<double>> coeffs = energy_idx_to_coeff[E_index];
+		double cos_angle = cos(angle);
+		double sin_angle = sin(angle);
+		double ln_angle = log(angle);
+		vector<double> first_log_vec(coeffs[0].size(), 1.0);
+		vector<double> second_log_vec(coeffs[1].size(), 1.0);
+		for(size_t i = 0; i < max(coeffs[0].size(), coeffs[1].size()); ++i){
+			if(i < coeffs[0].size() and i != 0)
+				first_log_vec[i] = ln_angle * first_log_vec[i-1];
+			if(i < coeffs[1].size()){
+				second_log_vec[i] = i != 0 ? ln_angle * second_log_vec[i-1] : ln_angle;
+			}
+		}
+		return (1 - cos_angle) * (coeffs[2][0] + coeffs[2][1]*(1 - cos_angle) + coeffs[2][1]*sin_angle*sin_angle)
+				* exp(inner_product(coeffs[0].begin(), coeffs[0].end(), first_log_vec.begin(), 0.0)
+				/ inner_product(coeffs[1].begin(), coeffs[1].end(), second_log_vec.begin(), 1.0));
+	}
+
+	double max_angle;
+	vector<vector<vector<double>>> energy_idx_to_coeff;
+	vector<double> energies;
+	vector<double> diffus_coeff;
+};
+
 class HHplus_elastic : public PlasmaGasProcess{
 public:
 	HHplus_elastic(const string& path, const VelocityGrid& v_g, const VelocityGrid& v_p, const Plasma& p) :
 		PlasmaGasProcess(ProcessType::Hp_elastic, DataType::Differential_cross_section){
-		fstream file(path, ios_base::in);
-		if(file.is_open()){
-			string line;
-			while(getline(file, line)){
-				istringstream buffer(line);
-				energies.push_back(*istream_iterator<double>(buffer));
-				vector<vector<double>> current_params;
-				for(size_t i = 0; i < 3; ++i){
-					getline(file, line);
-					istringstream tmp_buffer(line);
-					vector<double> param((istream_iterator<double>(tmp_buffer)),
-							istream_iterator<double>());
-					current_params.push_back(param);
-				}
-				energy_idx_to_coeff.push_back(current_params);
-			}
-		}else
-			throw logic_error(path + " : file not found");
+		auto dp = ReadElasticCrossSec(path);
+		energies = move(dp.first);
+		energy_idx_to_coeff = move(dp.second);
 		size_t vp_size = v_p.GetSize();
 		size_t vg_size = v_g.GetSize();
 		size_t N_angle = 500;
@@ -542,24 +619,9 @@ private:
 class HH_elastic : public GasGasProcess{
 public:
 	HH_elastic(const string& path, const VelocityGrid& v) : GasGasProcess(ProcessType::HH_elastic, DataType::Differential_cross_section){
-		fstream file(path, ios_base::in);
-		if(file.is_open()){
-			string line;
-			while(getline(file, line)){
-				istringstream buffer(line);
-				energies.push_back(*istream_iterator<double>(buffer));
-				vector<vector<double>> current_params;
-				for(size_t i = 0; i < 3; ++i){
-					getline(file, line);
-					istringstream tmp_buffer(line);
-					vector<double> param((istream_iterator<double>(tmp_buffer)),
-							istream_iterator<double>());
-					current_params.push_back(param);
-				}
-				energy_idx_to_coeff.push_back(current_params);
-			}
-		}else
-			throw logic_error(path + " : file not found");
+		auto p = ReadElasticCrossSec(path);
+		energies = move(p.first);
+		energy_idx_to_coeff = move(p.second);
 		size_t v_size = v.GetSize();
 		size_t N_angle = 500;
 		double phase_volume = pow(v.GetGridStep(),3);
@@ -619,19 +681,7 @@ public:
 
 private:
 	double ComputeDiffCross(const double E, const double angle) const{
-		auto upper_bound_energy = upper_bound(energies.begin(), energies.end(), E);
-		if(upper_bound_energy == energies.end()){
-			return FittingFunction(energies.size()-1, angle);
-		}
-		size_t upper_index = upper_bound_energy - energies.begin();
-		if(upper_index == 0){
-			return FittingFunction(0, angle);
-		}
-		double upper_cross_section = FittingFunction(upper_index, angle);
-		double lower_cross_section = FittingFunction(upper_index - 1, angle);
-		return lower_cross_section
-				+ (E - energies[upper_index-1]) / (energies[upper_index] - energies[upper_index-1])
-				* (upper_cross_section - lower_cross_section);
+		return LinearDataApprox(E, angle, energies, FittingFunction);
 	}
 
 	double FittingFunction(const size_t E_index, double angle) const{

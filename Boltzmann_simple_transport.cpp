@@ -75,7 +75,7 @@ void CXCheck(const Plasma& p, const DistributionFunction& df){
 
 void HeElasticCheck(const Plasma& p){
 	He_elastic Hee("HeElastic.txt", p.GetIonMass(), p);
-	cout << Hee.GetDiffusCoeff(0);
+	cout << datum::m_p * datum::c_0 * datum::c_0 / datum::eV / Hee.GetDiffusCoeff(0);
 }
 
 int main() {
@@ -100,18 +100,18 @@ int main() {
 	VelocityGrid v(v_size, Tg, mg);
 
 	// Time Evolution
-	//size_t N_steps = 20;
+	size_t N_steps = 20;
 
 	DistributionFunction f_H(DistributionType::TestDistribution_1, mg, v, ng, Tg);
-	Gas H(f_H, vector<shared_ptr<PlasmaGasProcess>>({make_shared<Charge_exchange>("ChargeExchange.txt", p, f_H)}), vector<shared_ptr<GasGasProcess>>{});
-	//for(size_t t = 0; t < N_steps; ++t){
-	//	auto times = H.TimeEvolution_SmartTimeStep(p, 0.1);
-	//	H.SaveDistr(0, t);
-	//	cout << times.first << ' ' << times.second << '\n';
-	//}
+	Gas H(f_H, vector<shared_ptr<PlasmaGasProcess>>({make_shared<He_elastic>("HeElastic.txt", p.GetIonMass() , p)}), vector<shared_ptr<GasGasProcess>>{});
+	for(size_t t = 0; t < N_steps; ++t){
+		auto times = H.TimeEvolution_SmartTimeStep(p, 0.1);
+		H.SaveDistr(0, t);
+		cout << times.first << ' ' << times.second << '\n';
+	}
 	//SaveProcessData(p, f_H, 100, 50);
 	//CXCheck(p, f_H);
-	HeElasticCheck(p);
+	//HeElasticCheck(p);
 
 	return 0;
 }
