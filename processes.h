@@ -45,48 +45,29 @@ enum class ParamsType{
 
 vec BuildLogVec(const double x, const size_t s);
 
+double FittingFunction(const vector<vector<double>>& coeffs, double angle, ProcessType pt);
+
 template<typename func>
-double LinearDataApprox(const double E, const double angle, const vector<double>& energies, func& f){
+double LinearDataApprox(const double E, double angle, const vector<double>& energies,
+		const vector<vector<vector<double>>>& E_ixd_to_coeffs, func& f, ProcessType pt){
 	auto upper_bound_energy = upper_bound(energies.begin(), energies.end(), E);
 	if(upper_bound_energy == energies.end()){
-		return f(energies.size()-1, angle);
+		return f(E_ixd_to_coeffs[energies.size()-1], angle, pt);
 	}
 	size_t upper_index = upper_bound_energy - energies.begin();
 	cout << upper_index << endl;
 	if(upper_index == 0){
-		return f(0, angle);
+		return f(E_ixd_to_coeffs[0], angle, pt);
 	}
-	double upper_cross_section = f(upper_index, angle);
-	double lower_cross_section = f(upper_index - 1, angle);
+	double upper_cross_section = f(E_ixd_to_coeffs[upper_index], angle, pt);
+	double lower_cross_section = f(E_ixd_to_coeffs[upper_index - 1], angle, pt);
 	cout << upper_cross_section << ' ' << lower_cross_section << endl;
 	return lower_cross_section
 			+ (E - energies[upper_index-1]) / (energies[upper_index] - energies[upper_index-1])
 			* (upper_cross_section - lower_cross_section);
 }
 
-pair<vector<double>, vector<vector<vector<double>>>> ReadElasticCrossSec(const string& path){
-	fstream file(path, ios_base::in);
-	vector<vector<vector<double>>> result;
-	vector<double> energies;
-	if(file.is_open()){
-		string line;
-		while(getline(file, line)){
-			istringstream buffer(line);
-			energies.push_back(*istream_iterator<double>(buffer));
-			vector<vector<double>> current_params;
-			for(size_t i = 0; i < 3; ++i){
-				getline(file, line);
-				istringstream tmp_buffer(line);
-				vector<double> param((istream_iterator<double>(tmp_buffer)),
-						istream_iterator<double>());
-				current_params.push_back(param);
-			}
-			result.push_back(current_params);
-		}
-	}else
-		throw logic_error(path + " : file not found");
-	return make_pair(energies, result);
-}
+pair<vector<double>, vector<vector<vector<double>>>> ReadElasticCrossSec(const string& path);
 
 class PlasmaGasProcess{
 public:
@@ -391,7 +372,6 @@ public:
 		auto data = ReadElasticCrossSec(path);
 		energies = move(data.first);
 		energy_idx_to_coeff = move(data.second);
-
 	}
 
 private:
@@ -401,165 +381,17 @@ private:
 		vec angles = linspace(0, max_angle, N_angles);
 		double angle_step = angles(1) - angles(0);
 		for(size_t i = 0; i < N_angles-1; ++i){
-			result += LinearDataApprox(E, angles(i), energies, FittingFunction)
-					+ LinearDataApprox(E, angles(i+1), energies, FittingFunction);
+			result += LinearDataApprox(E, angles(i), energies, energy_idx_to_coeff, FittingFunction, ProcessType::HFastIons_elastic)
+					+ LinearDataApprox(E, angles(i+1), energies, energy_idx_to_coeff, FittingFunction, ProcessType::HFastIons_elastic);
 		}
 		result *= angle_step * 0.5;
 		return result;
-	}
-
-	double FittingFunction(const size_t E_index, double angle) const{
-		vector<vector<double>> coeffs = energy_idx_to_coeff[E_index];
-		double cos_angle = cos(angle);
-		double sin_angle = sin(angle);
-		double ln_angle = log(angle);
-		vector<double> first_log_vec(coeffs[0].size(), 1.0);
-		vector<double> second_log_vec(coeffs[1].size(), 1.0);
-		for(size_t i = 0; i < max(coeffs[0].size(), coeffs[1].size()); ++i){
-			if(i < coeffs[0].size() and i != 0)
-				first_log_vec[i] = ln_angle * first_log_vec[i-1];
-			if(i < coeffs[1].size()){
-				second_log_vec[i] = i != 0 ? ln_angle * second_log_vec[i-1] : ln_angle;
-			}
-		}
-		return (1 - cos_angle) * (coeffs[2][0] + coeffs[2][1]*(1 - cos_angle) + coeffs[2][1]*sin_angle*sin_angle)
-				* exp(inner_product(coeffs[0].begin(), coeffs[0].end(), first_log_vec.begin(), 0.0)
-				/ inner_product(coeffs[1].begin(), coeffs[1].end(), second_log_vec.begin(), 1.0));
 	}
 
 	double max_angle;
 	vector<vector<vector<double>>> energy_idx_to_coeff;
 	vector<double> energies;
 	vector<double> diffus_coeff;
-};
-
-class HHplus_elastic : public PlasmaGasProcess{
-public:
-	HHplus_elastic(const string& path, const VelocityGrid& v_g, const VelocityGrid& v_p, const Plasma& p) :
-		PlasmaGasProcess(ProcessType::Hp_elastic, DataType::Differential_cross_section){
-		auto dp = ReadElasticCrossSec(path);
-		energies = move(dp.first);
-		energy_idx_to_coeff = move(dp.second);
-		size_t vp_size = v_p.GetSize();
-		size_t vg_size = v_g.GetSize();
-		size_t N_angle = 500;
-		double phase_volume = pow(v_p.GetGridStep(),3);
-		vec pl_vel_1D(v_p.Get1DGrid());
-		vec gas_vel_1D(v_g.Get1DGrid());
-		mat sourse(vp_size * vp_size * vp_size, vg_size * vg_size * vg_size, fill::zeros);
-		mat runoff(sourse);
-		double factor = phase_volume * 4 * datum::pi / N_angle;
-		for(size_t k = 0; k < vp_size; ++k){
-			for(size_t l = 0; l < vp_size; ++l){
-				for(size_t m = 0; m < vp_size; ++m){
-					vec3 second_particle_velocity = {pl_vel_1D(m), pl_vel_1D(l), pl_vel_1D(k)};
-					double reletive_velocity = sqrt(Sqr(second_particle_velocity(0))
-							+ Sqr(second_particle_velocity(1))
-							+ Sqr(second_particle_velocity(2)));
-					double CM_energy = datum::m_p * Sqr(reletive_velocity) * 0.25 / datum::eV;
-					vector<vec3> sphere_points;
-					if(array<size_t,3>({m, l, k}) != array<size_t,3>({0, 0, 0})){
-						sphere_points = ScatteringSphere(N_angle, second_particle_velocity, {0,0,0});
-					}
-					for(auto& point : sphere_points){
-						pair<vec3, vec3> post_collision_velocities = PostCollisionVelocities(second_particle_velocity, point, reletive_velocity, 0.0);
-						auto Node_1 = FindNearestNode(pl_vel_1D, post_collision_velocities.first);
-						auto Node_2 = FindNearestNode(gas_vel_1D, post_collision_velocities.second);
-						double cross_section = ComputeDiffCross(CM_energy, acos(norm_dot(point, -second_particle_velocity)));
-						double elem = factor * reletive_velocity * cross_section;
-						if (Node_1.second && Node_2.second){
-							sourse(vp_size*vp_size*Node_1.first[2] + vp_size*Node_1.first[1] + Node_1.first[0],
-									vg_size*vg_size*Node_2.first[2] + vg_size*Node_2.first[1] + Node_2.first[0]) += elem;
-						}
-						runoff(vp_size*vp_size*k + vp_size*l + m, (vg_size * vg_size * vg_size - 1) / 2) += elem;
-					}
-				}
-			}
-		}
-		mat G = move(sourse) - move(runoff);
-		for(size_t i = 0; i < p.GetSpaceSize(); ++i){
-			for(size_t k = 0; k < vp_size; ++k){
-				for(size_t l = 0; l < vp_size; ++l){
-					for(size_t m = 0; m < vp_size; ++m){
-						cube df_shift = DFShiftProcedure(p.MakeMaxwellDistr(i, pl_vel_1D), {m, l, k});
-						collisions_mat[i] = join_vert(collisions_mat[i], vectorise(df_shift).t()*G);
-					}
-				}
-			}
-		}
-	}
-
-	vector<cube> ComputePGRightHandSide(const Plasma& p, const DistributionFunction& df) const override{
-		size_t x_size = df.GetSpaceGrid().GetSize();
-		size_t v_size = df.GetVelGrid().GetSize();
-		vector<cube> result(x_size, cube(v_size,v_size,v_size,fill::zeros));
-		for(size_t i = 0; i < x_size; ++i){
-			for(size_t k = 0; k < v_size; ++k){
-				for(size_t l = 0; l < v_size; ++l){
-					for(size_t m = 0; m < v_size; ++m){
-						cube df_shift = DFShiftProcedure(df.GetDistrSlice(i), {m, l, k});
-						result[i](m,l,k) = dot(collisions_mat[i].row(k*v_size*v_size + l*v_size +m),vectorise(df_shift));
-					}
-				}
-			}
-		}
-		return result;
-	}
-
-	void SaveDiffCross(const double E, const size_t N_angle) const{
-		vec angles(N_angle, fill::zeros);
-		vec diff_cross(N_angle, fill::zeros);
-		for(size_t i = 0; i < N_angle; ++i){
-			angles(i) = i * datum::pi / (N_angle - 1);
-			diff_cross(i) = ComputeDiffCross(E, angles(i));
- 		}
-		angles.save("angles_range.bin", raw_binary);
-		diff_cross.save("HHplus_diff_cross.bin", raw_binary);
-	}
-
-private:
-	double ComputeDiffCross(const double E, const double angle) const{
-		auto upper_bound_energy = upper_bound(energies.begin(), energies.end(), E);
-		if(upper_bound_energy == energies.end()){
-			return FittingFunction(energies.size()-1, angle);
-		}
-		size_t upper_index = upper_bound_energy - energies.begin();
-		if(upper_index == 0){
-			return FittingFunction(0, angle);
-		}
-		double upper_cross_section = FittingFunction(upper_index, angle);
-		double lower_cross_section = FittingFunction(upper_index - 1, angle);
-		return lower_cross_section
-				+ (E - energies[upper_index-1]) / (energies[upper_index] - energies[upper_index-1])
-				* (upper_cross_section - lower_cross_section);
-	}
-
-	double FittingFunction(const size_t E_index, double angle) const{
-		angle = (angle < 1e-5) ? 1e-5 : angle;
-		angle = (angle > datum::pi - 1e-4) ? datum::pi - 1e-4 : angle;
-		vector<vector<double>> coeffs = energy_idx_to_coeff[E_index];
-		double cos_angle = cos(angle);
-		double sin_angle = sin(angle);
-		double ln_angle = log(angle);
-		vector<double> first_log_vec(coeffs[0].size(), 1.0);
-		vector<double> second_log_vec(coeffs[1].size(), 1.0);
-		for(size_t i = 0; i < max(coeffs[0].size(), coeffs[1].size()); ++i){
-			if(i < coeffs[0].size() and i != 0)
-				first_log_vec[i] = ln_angle * first_log_vec[i-1];
-			if(i < coeffs[1].size()){
-				second_log_vec[i] = i != 0 ? ln_angle * second_log_vec[i-1] : ln_angle;
-			}
-		}
-		return (coeffs[2][0] + coeffs[2][1]*(1 - cos_angle) + coeffs[2][1]*sin_angle*sin_angle)
-				/ (2*datum::pi*sin_angle)
-				* exp(inner_product(coeffs[0].begin(), coeffs[0].end(), first_log_vec.begin(), 0.0)
-						/ inner_product(coeffs[1].begin(), coeffs[1].end(), second_log_vec.begin(), 1.0))
-				* datum::a_0 * datum::a_0 * 1e4;
-	}
-
-	vector<vector<vector<double>>> energy_idx_to_coeff;
-	vector<double> energies;
-	vector<mat> collisions_mat;
 };
 
 class Hard_spheres_collision : public GasGasProcess{
@@ -681,30 +513,7 @@ public:
 
 private:
 	double ComputeDiffCross(const double E, const double angle) const{
-		return LinearDataApprox(E, angle, energies, FittingFunction);
-	}
-
-	double FittingFunction(const size_t E_index, double angle) const{
-		angle = (angle < 1e-5) ? 1e-5 : angle;
-		angle = (angle > datum::pi - 1e-4) ? datum::pi - 1e-4 : angle;
-		vector<vector<double>> coeffs = energy_idx_to_coeff[E_index];
-		double cos_angle = cos(angle);
-		double sin_angle = sin(angle);
-		double ln_angle = log(angle);
-		vector<double> first_log_vec(coeffs[0].size(), 1.0);
-		vector<double> second_log_vec(coeffs[1].size(), 1.0);
-		for(size_t i = 0; i < max(coeffs[0].size(), coeffs[1].size()); ++i){
-			if(i < coeffs[0].size() and i != 0)
-				first_log_vec[i] = ln_angle * first_log_vec[i-1];
-			if(i < coeffs[1].size()){
-				second_log_vec[i] = i != 0 ? ln_angle * second_log_vec[i-1] : ln_angle;
-			}
-		}
-		return (coeffs[2][0] + coeffs[2][1]*(1 - cos_angle) + coeffs[2][1]*sin_angle*sin_angle)
-				/ (2*datum::pi*sin_angle)
-				* exp(inner_product(coeffs[0].begin(), coeffs[0].end(), first_log_vec.begin(), 0.0)
-						/ inner_product(coeffs[1].begin(), coeffs[1].end(), second_log_vec.begin(), 1.0))
-				* datum::a_0 * datum::a_0 * 1e4;
+		return LinearDataApprox(E, angle, energies, energy_idx_to_coeff, FittingFunction, ProcessType::HH_elastic);
 	}
 
 	vector<vector<vector<double>>> energy_idx_to_coeff;
