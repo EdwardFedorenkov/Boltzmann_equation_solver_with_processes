@@ -375,17 +375,8 @@ public:
 	}
 
 private:
-	double ComputeIntOverAngles(const double E) const{
-		double result = 0.0;
-		size_t N_angles = 100;
-		vec angles = linspace(0, max_angle, N_angles);
-		double angle_step = angles(1) - angles(0);
-		for(size_t i = 0; i < N_angles-1; ++i){
-			result += LinearDataApprox(E, angles(i), energies, energy_idx_to_coeff, FittingFunction, ProcessType::HFastIons_elastic)
-					+ LinearDataApprox(E, angles(i+1), energies, energy_idx_to_coeff, FittingFunction, ProcessType::HFastIons_elastic);
-		}
-		result *= angle_step * 0.5;
-		return result;
+	double DiffCrossByAngle(const double E, const double angle) const{
+		return LinearDataApprox(E, angle, energies, energy_idx_to_coeff, FittingFunction, ProcessType::HH_elastic);
 	}
 
 	double max_angle;

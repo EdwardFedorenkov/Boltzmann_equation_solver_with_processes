@@ -49,7 +49,7 @@ double FittingFunction(const vector<vector<double>>& coeffs, double angle, Proce
 		}
 	}
 	if(pt == ProcessType::HFastIons_elastic){
-		return (1 - cos_angle) * (coeffs[2][0] + coeffs[2][1]*(1 - cos_angle) + coeffs[2][1]*sin_angle*sin_angle)
+		return (coeffs[2][0] + coeffs[2][1]*(1 - cos_angle) + coeffs[2][1]*sin_angle*sin_angle)
 				* exp(inner_product(coeffs[0].begin(), coeffs[0].end(), first_log_vec.begin(), 0.0)
 				/ inner_product(coeffs[1].begin(), coeffs[1].end(), second_log_vec.begin(), 1.0));
 	}else if(pt == ProcessType::HH_elastic){
