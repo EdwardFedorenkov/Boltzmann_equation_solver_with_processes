@@ -31,6 +31,10 @@ double Plasma::GetDensity(const size_t idx) const{
 	return np[idx];
 }
 
+double Plasma::GetTermalVel(const size_t idx) const{
+	return sqrt(2 * Tp[idx] / ion_mass) * datum::c_0 * 100;
+}
+
 size_t Plasma::GetSpaceSize() const{
 	return Tp.size();
 }

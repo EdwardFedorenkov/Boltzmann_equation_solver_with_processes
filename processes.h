@@ -372,26 +372,31 @@ private:
 
 class HFastIons_elastic : public PlasmaGasProcess{
 public:
-	HFastIons_elastic(const string& path, const Plasma& p,  const VelocityGrid& v, const double vp_min_, const double vp_max_) :
-		PlasmaGasProcess(ProcessType::HFastIons_elastic, DataType::Differential_cross_section), vp_min(vp_min_), vp_max(vp_max_){
+	HFastIons_elastic(const string& path, const Plasma& p,  const VelocityGrid& v) :
+		PlasmaGasProcess(ProcessType::HFastIons_elastic, DataType::Differential_cross_section),
+		diffus_coeffs(vector<cube>(p.GetSpaceSize(), cube(v.GetSize(),v.GetSize(),v.GetSize(), fill::zeros))){
 		auto data = ReadElasticCrossSec(path);
 		energies = move(data.first);
 		energy_idx_to_coeff = move(data.second);
 		size_t v_size = v.GetSize();
-		size_t N_angle = 500;
 		size_t N_plasma_vel = 500;
+		vector<double> Vel_1D(v.Get1DGrid());
 		double phase_volume = pow(v.GetGridStep(), 3);
-		vec nu(v_size * v_size * v_size, fill::zeros);
-		for(size_t k1 = 0; k1 < v_size; ++k1){
-			for(size_t l1 = 0; l1 < v_size; ++l1){
-				for(size_t m1 = 0; m1 < v_size; ++m1){
-					for(size_t k2 = 0; k2 < v_size; ++k2){
-						for(size_t l2 = 0; l2 < v_size; ++l2){
-							for(size_t m2 = 0; m2 < v_size; ++m2){
-								if(tie(k1,l1,m1) != tie(k2,l2,m2)){
-									RateCoeff = phase_volume * IntegralOverPlasmaVel(N_plasma_vel);
-									nu(v_size*v_size*k1 + v_size*l1 + m1) =
-									nu(v_size*v_size*k2 + v_size*l2 + m2) =
+		for(size_t i = 0; i < p.GetSpaceSize(); i++){
+			for(size_t k1 = 0; k1 < v_size; ++k1){
+				for(size_t l1 = 0; l1 < v_size; ++l1){
+					for(size_t m1 = 0; m1 < v_size; ++m1){
+						for(size_t k2 = 0; k2 < v_size; ++k2){
+							for(size_t l2 = 0; l2 < v_size; ++l2){
+								for(size_t m2 = 0; m2 < v_size; ++m2){
+									if(tie(k1,l1,m1) != tie(k2,l2,m2)){
+										vec vel_1 = {Vel_1D[m1], Vel_1D[l1], Vel_1D[k1]};
+										vec vel_2 = {Vel_1D[m2], Vel_1D[l2], Vel_1D[k2]};
+										double RateCoeff = IntegralOverPlasmaVel(N_plasma_vel, i, p, norm(vel_2 - vel_1)) * phase_volume
+												/ (4 * datum::pi * norm(vel_2 - vel_1) * norm(vel_2 - vel_1));
+										diffus_coeffs[i](m1,l1,k1) += -RateCoeff;
+										diffus_coeffs[i](m2,l2,k2) += RateCoeff;
+									}
 								}
 							}
 						}
@@ -401,22 +406,40 @@ public:
 		}
 	}
 
+	vector<cube> ComputePGRightHandSide(const Plasma& p, const DistributionFunction& df) const override{
+		size_t v_size = df.GetVelGrid().GetSize();
+		vector<cube> rhs(p.GetSpaceSize(), cube(v_size,v_size,v_size, fill::zeros ));
+		for(size_t i = 0; i < p.GetSpaceSize(); ++i){
+			rhs[i] = diffus_coeffs[i] % df.GetDistrSlice(i);
+		}
+		return rhs;
+	}
+
 private:
-	double DiffCrossByAngle(const double E, const double angle) const{
+	double DiffCrossByGasVel(const double E, const double angle) const{
 		return LinearDataApprox(E, angle, energies, energy_idx_to_coeff, FittingFunction, ProcessType::HH_elastic);
 	}
 
-	double IntegralOverPlasmaVel(const size_t N) const{
-		for(size_t i = 0; i < N; ++i){
-
+	double IntegralOverPlasmaVel(const size_t N, const size_t space_idx, const Plasma& p, const double gas_delta_vel) const{
+		double result = 0.0;
+		double x_min = 1;
+		double x_max = 5;
+		vec x = linspace(x_min, x_max, N);
+		double x_step = x(2) - x(1);
+		vec plasma_energys = linspace(p.GetTemperature(space_idx), p.GetTemperature(space_idx)*5, N);
+		vec plasma_vel = linspace(p.GetTermalVel(space_idx), sqrt(5) * p.GetTermalVel(space_idx), N);
+		for(size_t i = 0; i < N-1; ++i){
+			double angle = acos(1 - 2 * gas_delta_vel * gas_delta_vel / (plasma_vel(i) * plasma_vel(i)));
+			double angle_next = acos(1 - 2 * gas_delta_vel * gas_delta_vel / (plasma_vel(i+1) * plasma_vel(i+1)));
+			result += 0.5 * (DiffCrossByGasVel(plasma_energys(i), angle) * x(i) * exp(-x(i)) +
+					   DiffCrossByGasVel(plasma_energys(i+1), angle_next) * x(i+1) * exp(-x(i+1)));
 		}
+		return result * 2 * p.GetDensity(space_idx) * p.GetTermalVel(space_idx) * x_step / sqrt(datum::pi);
 	}
 
-	double vp_min;
-	double vp_max;
 	vector<vector<vector<double>>> energy_idx_to_coeff;
 	vector<double> energies;
-	vec diffus_coeff;
+	vector<cube> diffus_coeffs;
 };
 
 // ------------------------------------
