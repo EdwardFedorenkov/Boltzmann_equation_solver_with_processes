@@ -95,6 +95,11 @@ private:
 	DataType dt;
 };
 
+// -----------------------------------------
+// ----------Plasma-Gas processes-----------
+// -----------------------------------------
+
+
 class Charge_exchange : public PlasmaGasProcess{
 public:
 	Charge_exchange(const string& path, const Plasma& p, const DistributionFunction& df) :
@@ -367,11 +372,33 @@ private:
 
 class HFastIons_elastic : public PlasmaGasProcess{
 public:
-	HFastIons_elastic(const string& path, const Plasma& p, const double max_angle_) :
-		PlasmaGasProcess(ProcessType::HFastIons_elastic, DataType::Diffusion_coefficient), max_angle(max_angle_){
+	HFastIons_elastic(const string& path, const Plasma& p,  const VelocityGrid& v, const double vp_min_, const double vp_max_) :
+		PlasmaGasProcess(ProcessType::HFastIons_elastic, DataType::Differential_cross_section), vp_min(vp_min_), vp_max(vp_max_){
 		auto data = ReadElasticCrossSec(path);
 		energies = move(data.first);
 		energy_idx_to_coeff = move(data.second);
+		size_t v_size = v.GetSize();
+		size_t N_angle = 500;
+		size_t N_plasma_vel = 500;
+		double phase_volume = pow(v.GetGridStep(), 3);
+		vec nu(v_size * v_size * v_size, fill::zeros);
+		for(size_t k1 = 0; k1 < v_size; ++k1){
+			for(size_t l1 = 0; l1 < v_size; ++l1){
+				for(size_t m1 = 0; m1 < v_size; ++m1){
+					for(size_t k2 = 0; k2 < v_size; ++k2){
+						for(size_t l2 = 0; l2 < v_size; ++l2){
+							for(size_t m2 = 0; m2 < v_size; ++m2){
+								if(tie(k1,l1,m1) != tie(k2,l2,m2)){
+									RateCoeff = phase_volume * IntegralOverPlasmaVel(N_plasma_vel);
+									nu(v_size*v_size*k1 + v_size*l1 + m1) =
+									nu(v_size*v_size*k2 + v_size*l2 + m2) =
+								}
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 
 private:
@@ -379,11 +406,22 @@ private:
 		return LinearDataApprox(E, angle, energies, energy_idx_to_coeff, FittingFunction, ProcessType::HH_elastic);
 	}
 
-	double max_angle;
+	double IntegralOverPlasmaVel(const size_t N) const{
+		for(size_t i = 0; i < N; ++i){
+
+		}
+	}
+
+	double vp_min;
+	double vp_max;
 	vector<vector<vector<double>>> energy_idx_to_coeff;
 	vector<double> energies;
-	vector<double> diffus_coeff;
+	vec diffus_coeff;
 };
+
+// ------------------------------------
+// ---------- Gas processes -----------
+// ------------------------------------
 
 class Hard_spheres_collision : public GasGasProcess{
 public:
