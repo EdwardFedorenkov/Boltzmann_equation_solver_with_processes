@@ -31,4 +31,3 @@ private:
 	vector<double> np;
 	double ion_mass;
 };
-

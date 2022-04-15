@@ -63,7 +63,7 @@ public:
 
 	void ChangeDFbyTransport();
 
-	void ChangeDFbyProcess(const vector<cube>& rhs);
+	void ChangeDFbyProcess(const vector<cube>& rhs, const double time_step);
 
 	// ----Can be in private section----
 

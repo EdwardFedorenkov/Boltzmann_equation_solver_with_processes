@@ -374,12 +374,13 @@ class HFastIons_elastic : public PlasmaGasProcess{
 public:
 	HFastIons_elastic(const string& path, const Plasma& p,  const VelocityGrid& v) :
 		PlasmaGasProcess(ProcessType::HFastIons_elastic, DataType::Differential_cross_section),
-		diffus_coeffs(vector<cube>(p.GetSpaceSize(), cube(v.GetSize(),v.GetSize(),v.GetSize(), fill::zeros))){
+		source_coeff(vector<mat>(p.GetSpaceSize(), mat(pow(v.GetSize(),3),pow(v.GetSize(),3),fill::zeros) )),
+		runoff_coeff(vector<vec>(p.GetSpaceSize(), vec(pow(v.GetSize(),3),fill::zeros))){
 		auto data = ReadElasticCrossSec(path);
 		energies = move(data.first);
 		energy_idx_to_coeff = move(data.second);
 		size_t v_size = v.GetSize();
-		size_t N_plasma_vel = 500;
+		size_t N_plasma_vel = 50;
 		vector<double> Vel_1D(v.Get1DGrid());
 		double phase_volume = pow(v.GetGridStep(), 3);
 		for(size_t i = 0; i < p.GetSpaceSize(); i++){
@@ -389,13 +390,21 @@ public:
 						for(size_t k2 = 0; k2 < v_size; ++k2){
 							for(size_t l2 = 0; l2 < v_size; ++l2){
 								for(size_t m2 = 0; m2 < v_size; ++m2){
-									if(tie(k1,l1,m1) != tie(k2,l2,m2)){
+									if(m1 + l1*v_size + k1*v_size*v_size < m2 + l2*v_size + k2*v_size*v_size){
 										vec vel_1 = {Vel_1D[m1], Vel_1D[l1], Vel_1D[k1]};
 										vec vel_2 = {Vel_1D[m2], Vel_1D[l2], Vel_1D[k2]};
-										double RateCoeff = IntegralOverPlasmaVel(N_plasma_vel, i, p, norm(vel_2 - vel_1)) * phase_volume
+										double RateCoeff = IntegralOverPlasmaVel(N_plasma_vel, i, p, norm(vel_2 - vel_1), false) * phase_volume
 												/ (4 * datum::pi * norm(vel_2 - vel_1) * norm(vel_2 - vel_1));
-										diffus_coeffs[i](m1,l1,k1) += -RateCoeff;
-										diffus_coeffs[i](m2,l2,k2) += RateCoeff;
+										source_coeff[i](
+													m1 + l1*v_size + k1*v_size*v_size,
+													m2 + l2*v_size + k2*v_size*v_size
+												)
+												= RateCoeff;
+										if(isnan(RateCoeff)){
+											cout << m1 << ' ' << l1 << ' ' << k1 << ' ' << m2 << ' ' << l2 << ' ' << k2 << endl;
+											cout << norm(vel_2 - vel_1) << endl;
+											IntegralOverPlasmaVel(N_plasma_vel, i, p, norm(vel_2 - vel_1), true);
+										}
 									}
 								}
 							}
@@ -403,6 +412,8 @@ public:
 					}
 				}
 			}
+			source_coeff[i] = symmatu(source_coeff[i]);
+			runoff_coeff[i] = sum(source_coeff[i],1);
 		}
 	}
 
@@ -410,7 +421,14 @@ public:
 		size_t v_size = df.GetVelGrid().GetSize();
 		vector<cube> rhs(p.GetSpaceSize(), cube(v_size,v_size,v_size, fill::zeros ));
 		for(size_t i = 0; i < p.GetSpaceSize(); ++i){
-			rhs[i] = diffus_coeffs[i] % df.GetDistrSlice(i);
+			vec tmp_rhs = source_coeff[i] * vectorise(df.GetDistrSlice(i)) - runoff_coeff[i] % vectorise(df.GetDistrSlice(i));
+			for(size_t k = 0; k < v_size; ++k){
+				for(size_t l = 0; l < v_size; ++l){
+					for(size_t m = 0; m < v_size; ++m){
+						rhs[i](m,l,k) = tmp_rhs(m + l*v_size + k*v_size*v_size);
+					}
+				}
+			}
 		}
 		return rhs;
 	}
@@ -420,26 +438,33 @@ private:
 		return LinearDataApprox(E, angle, energies, energy_idx_to_coeff, FittingFunction, ProcessType::HH_elastic);
 	}
 
-	double IntegralOverPlasmaVel(const size_t N, const size_t space_idx, const Plasma& p, const double gas_delta_vel) const{
+	double IntegralOverPlasmaVel(const size_t N, const size_t space_idx, const Plasma& p, const double gas_delta_vel,
+			bool flag_to_print) const{
 		double result = 0.0;
-		double x_min = 1;
-		double x_max = 5;
+		double x_min = 2;
+		double x_max = 8;
 		vec x = linspace(x_min, x_max, N);
 		double x_step = x(2) - x(1);
-		vec plasma_energys = linspace(p.GetTemperature(space_idx), p.GetTemperature(space_idx)*5, N);
-		vec plasma_vel = linspace(p.GetTermalVel(space_idx), sqrt(5) * p.GetTermalVel(space_idx), N);
+		vec plasma_energys = linspace(x_min*p.GetTemperature(space_idx), p.GetTemperature(space_idx)*x_max, N);
+		vec plasma_vel = linspace(sqrt(x_min)*p.GetTermalVel(space_idx), sqrt(x_max) * p.GetTermalVel(space_idx), N);
+		if(flag_to_print)
+			cout << plasma_vel << '\n';
 		for(size_t i = 0; i < N-1; ++i){
 			double angle = acos(1 - 2 * gas_delta_vel * gas_delta_vel / (plasma_vel(i) * plasma_vel(i)));
 			double angle_next = acos(1 - 2 * gas_delta_vel * gas_delta_vel / (plasma_vel(i+1) * plasma_vel(i+1)));
 			result += 0.5 * (DiffCrossByGasVel(plasma_energys(i), angle) * x(i) * exp(-x(i)) +
 					   DiffCrossByGasVel(plasma_energys(i+1), angle_next) * x(i+1) * exp(-x(i+1)));
+			if(flag_to_print){
+				cout << 1 - 2 * gas_delta_vel * gas_delta_vel / (plasma_vel(i) * plasma_vel(i)) << '\n';
+			}
 		}
 		return result * 2 * p.GetDensity(space_idx) * p.GetTermalVel(space_idx) * x_step / sqrt(datum::pi);
 	}
 
 	vector<vector<vector<double>>> energy_idx_to_coeff;
 	vector<double> energies;
-	vector<cube> diffus_coeffs;
+	vector<mat> source_coeff;
+	vector<vec> runoff_coeff;
 };
 
 // ------------------------------------

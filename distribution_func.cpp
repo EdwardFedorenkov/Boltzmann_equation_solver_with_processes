@@ -206,9 +206,9 @@ void DistributionFunction::ChangeDFbyTransport(){
 	}
 }
 
-void DistributionFunction::ChangeDFbyProcess(const vector<cube>& rhs){
+void DistributionFunction::ChangeDFbyProcess(const vector<cube>& rhs, const double time_step){
 	for(size_t i = 0; i < space_grid.GetSize(); ++i){
-		distribution_function(i) += rhs[i];
+		distribution_function(i) += rhs[i] * time_step;
 	}
 }
 

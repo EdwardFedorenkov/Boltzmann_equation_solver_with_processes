@@ -1,4 +1,4 @@
-#pragma once
+ #pragma once
 
 #include "distribution_func.h"
 #include "processes.h"
@@ -15,6 +15,8 @@ public:
 	vector<cube> ComputeRightHandSides(const Plasma& p) const;
 
 	pair<double, double> TimeEvolution_SmartTimeStep(const Plasma& p, const double time_accuracy);
+
+	void TimeEvolution_ConstTimeStep(const Plasma& p, const double time_step);
 
 	void SaveDistr(const size_t space_idx, const size_t time_idx);
 

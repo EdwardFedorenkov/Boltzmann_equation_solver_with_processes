@@ -45,13 +45,14 @@ vector<cube> Gas::ComputeRightHandSides(const Plasma& p) const{
 pair<double, double> Gas::TimeEvolution_SmartTimeStep(const Plasma& p, const double time_accuracy){
 	vector<cube> rhs = ComputeRightHandSides(p);
 	double proc_time_step = ComputeTimeStep(rhs, time_accuracy);
-	for(cube& c : rhs){
-		c *= proc_time_step;
-	}
 	double transport_time_step = df.ComputeTransportTimeStep();
 	df.ChangeDFbyTransport();
-	df.ChangeDFbyProcess(rhs);
+	df.ChangeDFbyProcess(rhs, proc_time_step);
 	return make_pair(transport_time_step, proc_time_step);
+}
+
+void Gas::TimeEvolution_ConstTimeStep(const Plasma& p, const double time_step){
+	df.ChangeDFbyProcess(ComputeRightHandSides(p), time_step);
 }
 
 void Gas::SaveDistr(const size_t space_idx, const size_t time_idx){
